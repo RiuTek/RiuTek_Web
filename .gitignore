@@ -1,0 +1,27 @@
+# Dependencies and build output
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test and tool output
+coverage/
+playwright-report/
+test-results/
+
+# Vercel local metadata
+.vercel/
+
+# Local execution plan shared with the coding agent
+docs/PLAN.md
