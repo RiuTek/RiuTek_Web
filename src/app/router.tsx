@@ -21,6 +21,10 @@ export const router = createBrowserRouter([
         element: <ComingSoonPage />,
       },
       {
+        path: '/cart',
+        element: <ComingSoonPage />,
+      },
+      {
         path: '/login',
         element: <ComingSoonPage />,
       },

@@ -6,7 +6,6 @@ import {
   Cpu,
   Layers,
   Zap,
-  ShieldCheck,
   PackageCheck,
   CheckCircle2,
   SlidersHorizontal,
@@ -35,7 +34,7 @@ export const HomePage: React.FC = () => {
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-red-50 border border-red-200/80 rounded-full mb-6 shadow-sm">
                 <Flame className="w-4 h-4 text-red-600" />
                 <span className="text-xs font-extrabold text-red-600 uppercase tracking-wider">
-                  RiuTek Kinetic Apex • Architecture Preview
+                  Hệ Sinh Thái Phần Cứng PC
                 </span>
               </div>
 
@@ -73,11 +72,11 @@ export const HomePage: React.FC = () => {
             {/* Telemetry Spec Footnote */}
             <div className="relative z-10 pt-6 mt-8 border-t border-slate-100 grid grid-cols-3 gap-2 sm:gap-4 text-slate-600">
               <div>
-                <div className="text-base sm:text-lg font-bold text-slate-950 font-mono">100%</div>
-                <div className="text-xs text-slate-500">Chuẩn thông số phần cứng</div>
+                <div className="text-base sm:text-lg font-bold text-slate-950 font-mono">Đồng bộ</div>
+                <div className="text-xs text-slate-500">Chuẩn form factor</div>
               </div>
               <div>
-                <div className="text-base sm:text-lg font-bold text-red-600 font-mono">Thông minh</div>
+                <div className="text-base sm:text-lg font-bold text-red-600 font-mono">Trực quan</div>
                 <div className="text-xs text-slate-500">Kiểm tra tương thích</div>
               </div>
               <div>
@@ -100,7 +99,7 @@ export const HomePage: React.FC = () => {
 
               <div className="relative z-10 flex justify-between items-start">
                 <span className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-full shadow-md">
-                  RIUTEK APEX PREVIEW
+                  RIUTEK APEX
                 </span>
                 <span className="px-3 py-1 bg-slate-950/80 backdrop-blur-md text-white text-xs font-mono rounded-full border border-white/20">
                   TDP: 450W Max
@@ -153,7 +152,7 @@ export const HomePage: React.FC = () => {
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 mb-1">
-                Tương Thích Tuyệt Đối
+                Kiểm Tra Tương Thích
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
                 Đồng bộ chuẩn socket, kích thước khe cắm và công suất nguồn tránh rủi ro nghẽn cổ chai phần cứng.
@@ -170,7 +169,7 @@ export const HomePage: React.FC = () => {
                 Quản Trị TDP &amp; Tản Nhiệt
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Tính toán chính xác nhiệt lượng tỏa ra và mức điện áp tiêu thụ để chọn bộ nguồn và quạt làm mát thích hợp.
+                Tham chiếu mức tiêu thụ điện và nhiệt lượng tỏa ra để gợi ý bộ nguồn và giải pháp làm mát thích hợp.
               </p>
             </div>
           </div>
@@ -251,7 +250,7 @@ export const HomePage: React.FC = () => {
           <div className="relative z-10 max-w-2xl mb-8">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-950/80 border border-red-800 rounded-full text-red-400 text-xs font-bold uppercase tracking-wider mb-4">
               <Sparkles className="w-3.5 h-3.5 text-red-500" />
-              PC Builder Studio Preview
+              PC Builder
             </div>
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight mb-4 text-white">
               Tự Tay Cấu Hình Dàn Máy Trong Vài Bước
@@ -289,7 +288,7 @@ export const HomePage: React.FC = () => {
 
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
             <div className="text-xs text-slate-400">
-              * Giao diện PC Builder tương tác đầy đủ sẽ được phát hành trong các phase kế tiếp.
+              * Một số tính năng đang được hoàn thiện.
             </div>
             <Link
               to="/pc-builder"
@@ -302,19 +301,19 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* 4. FEATURED PRODUCTS (PREVIEW UI) */}
+      {/* 4. FEATURED PRODUCTS */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
           <div>
             <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-mono font-medium mb-2 border border-slate-200">
-              [Preview UI — Mock Data]
+              Dữ liệu minh họa
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
-              Sản Phẩm Minh Họa Giao Diện
+              Sản Phẩm Nổi Bật
             </h2>
           </div>
           <p className="text-xs text-slate-500 max-w-sm">
-            Dữ liệu linh kiện mẫu giúp hiển thị trực quan thiết kế thẻ sản phẩm Kinetic Apex.
+            Các dòng linh kiện tiêu biểu với thông số kỹ thuật rõ ràng.
           </p>
         </div>
 
@@ -376,18 +375,18 @@ export const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* 5. SERVICE BENEFITS SECTION (GENERAL & HONEST) */}
+      {/* 5. SERVICE BENEFITS SECTION */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200/80 shadow-sm">
           <div className="text-center max-w-2xl mx-auto mb-10">
             <div className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
-              Giá Trị Cốt Lõi
+              Khả Năng Nền Tảng
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight mb-3">
               Tiêu Chuẩn Phần Cứng &amp; Dịch Vụ
             </h2>
             <p className="text-sm text-slate-600">
-              Cam kết mang đến trải nghiệm mua sắm linh kiện máy tính minh bạch, chuẩn xác và an tâm tuyệt đối cho mọi khách hàng.
+              Mang đến trải nghiệm tìm hiểu và lựa chọn linh kiện máy tính minh bạch, chuẩn xác và thuận tiện cho người dùng.
             </p>
           </div>
 
@@ -398,9 +397,9 @@ export const HomePage: React.FC = () => {
                 className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60"
               >
                 <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
-                  {b.iconName === 'ShieldCheck' && <ShieldCheck className="w-5 h-5" />}
+                  {b.iconName === 'Layers' && <Layers className="w-5 h-5" />}
                   {b.iconName === 'Cpu' && <Cpu className="w-5 h-5" />}
-                  {b.iconName === 'Zap' && <Zap className="w-5 h-5" />}
+                  {b.iconName === 'CheckCircle2' && <CheckCircle2 className="w-5 h-5" />}
                   {b.iconName === 'PackageCheck' && <PackageCheck className="w-5 h-5" />}
                 </div>
                 <h3 className="text-sm font-bold text-slate-900 mb-2">{b.title}</h3>
