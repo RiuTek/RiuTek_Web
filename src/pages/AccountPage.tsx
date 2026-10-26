@@ -15,6 +15,8 @@ import {
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { USER_ROLE_LABELS, type AuthUser, type UpdateProfileRequest } from '../features/auth/authTypes'
+import { AddressBook } from '../features/addresses/components/AddressBook'
+
 
 function formatCreatedAt(dateStr: string): string {
   try {
@@ -424,6 +426,9 @@ export const AccountPage: React.FC = () => {
 
       {/* Edit Profile Form */}
       <ProfileForm user={user} updateProfile={updateProfile} />
+
+      {/* Shipping Address Book */}
+      <AddressBook />
     </div>
   )
 }
