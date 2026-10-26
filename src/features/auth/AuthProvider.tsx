@@ -8,10 +8,18 @@ import { ApiError } from '../../lib/api'
 import {
   login as apiLogin,
   logout as apiLogout,
+  register as apiRegister,
+  updateProfile as apiUpdateProfile,
   refreshSession,
 } from './authApi'
 import { AuthContext, type AuthContextValue } from './AuthContext'
-import type { AuthStatus, AuthUser } from './authTypes'
+import type {
+  AuthResponse,
+  AuthStatus,
+  AuthUser,
+  RegisterRequest,
+  UpdateProfileRequest,
+} from './authTypes'
 
 interface AuthProviderProps {
   children: React.ReactNode
@@ -26,6 +34,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const accessTokenRef = useRef<string | null>(null)
   const expiresAtRef = useRef<number | null>(null)
 
+  // Helper chuẩn hóa cập nhật phiên làm việc từ AuthResponse
+  const applyAuthResponse = useCallback((data: AuthResponse) => {
+    accessTokenRef.current = data.accessToken
+    expiresAtRef.current = Date.now() + data.expiresInSeconds * 1000
+    setUser(data.user)
+    setStatus('authenticated')
+  }, [])
+
   // Bootstrap session khi app khởi động bằng refresh cookie HttpOnly
   useEffect(() => {
     let isMounted = true
@@ -33,10 +49,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     refreshSession()
       .then((data) => {
         if (!isMounted) return
-        accessTokenRef.current = data.accessToken
-        expiresAtRef.current = Date.now() + data.expiresInSeconds * 1000
-        setUser(data.user)
-        setStatus('authenticated')
+        applyAuthResponse(data)
       })
       .catch((err) => {
         if (!isMounted) return
@@ -54,17 +67,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => {
       isMounted = false
     }
-  }, [bootstrapTrigger])
+  }, [bootstrapTrigger, applyAuthResponse])
 
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
       const data = await apiLogin({ email, password })
-      accessTokenRef.current = data.accessToken
-      expiresAtRef.current = Date.now() + data.expiresInSeconds * 1000
-      setUser(data.user)
-      setStatus('authenticated')
+      applyAuthResponse(data)
     },
-    []
+    [applyAuthResponse]
+  )
+
+  const register = useCallback(
+    async (request: RegisterRequest): Promise<void> => {
+      const data = await apiRegister(request)
+      applyAuthResponse(data)
+    },
+    [applyAuthResponse]
   )
 
   const logout = useCallback(async (): Promise<void> => {
@@ -81,41 +99,75 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setBootstrapTrigger((prev) => prev + 1)
   }, [])
 
-  const getAccessToken = useCallback(async (): Promise<string | null> => {
-    const now = Date.now()
-    // Nếu token còn hạn an toàn (trừ hao 30 giây)
-    if (
-      accessTokenRef.current &&
-      expiresAtRef.current &&
-      expiresAtRef.current - now > 30_000
-    ) {
-      return accessTokenRef.current
-    }
-
-    // Nếu token thiếu hoặc sắp hết hạn trong 30s, dùng single-flight refresh
-    try {
-      const data = await refreshSession()
-      accessTokenRef.current = data.accessToken
-      expiresAtRef.current = Date.now() + data.expiresInSeconds * 1000
-      setUser(data.user)
-      setStatus('authenticated')
-      return data.accessToken
-    } catch (err) {
-      if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-        accessTokenRef.current = null
-        expiresAtRef.current = null
-        setUser(null)
-        setStatus('anonymous')
+  const getAccessToken = useCallback(
+    async (forceRefresh = false): Promise<string | null> => {
+      const now = Date.now()
+      // Nếu không forceRefresh và token còn hạn an toàn (trừ hao 30 giây)
+      if (
+        !forceRefresh &&
+        accessTokenRef.current &&
+        expiresAtRef.current &&
+        expiresAtRef.current - now > 30_000
+      ) {
+        return accessTokenRef.current
       }
-      throw err
-    }
-  }, [])
+
+      // Nếu token thiếu, sắp hết hạn trong 30s hoặc forceRefresh, dùng single-flight refresh
+      try {
+        const data = await refreshSession()
+        applyAuthResponse(data)
+        return data.accessToken
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          accessTokenRef.current = null
+          expiresAtRef.current = null
+          setUser(null)
+          setStatus('anonymous')
+        }
+        throw err
+      }
+    },
+    [applyAuthResponse]
+  )
+
+  const updateProfile = useCallback(
+    async (request: UpdateProfileRequest): Promise<void> => {
+      let token = await getAccessToken(false)
+      if (!token) {
+        throw new Error('Chưa đăng nhập.')
+      }
+
+      try {
+        const updatedUser = await apiUpdateProfile(request, token)
+        setUser(updatedUser)
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 401) {
+          // Token có thể đã bị revoke hoặc expired trên server -> force refresh đúng 1 lần
+          token = await getAccessToken(true)
+
+          if (!token) {
+            throw new Error('Chưa đăng nhập.', { cause: err })
+          }
+
+          // Retry update profile đúng 1 lần với token mới
+          const updatedUser = await apiUpdateProfile(request, token)
+          setUser(updatedUser)
+          return
+        }
+
+        throw err
+      }
+    },
+    [getAccessToken]
+  )
 
   const value: AuthContextValue = {
     status,
     user,
     isAuthenticated: status === 'authenticated' && user !== null,
     login,
+    register,
+    updateProfile,
     logout,
     retryBootstrap,
     getAccessToken,

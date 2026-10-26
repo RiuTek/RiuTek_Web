@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Lock, Mail, AlertCircle, Loader2 } from 'lucide-react'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
+import { BrandLogo } from '../components/branding/BrandLogo'
 
 function getSafeReturnUrl(raw: unknown): string {
   if (typeof raw !== 'string') return '/'
@@ -102,15 +103,10 @@ export const LoginPage: React.FC = () => {
         <div className="text-center space-y-2">
           <Link
             to="/"
-            className="inline-flex items-center gap-2 group mb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-full px-1"
+            className="inline-flex items-center gap-2 group mb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl px-1"
             aria-label="Trang chủ RiuTek"
           >
-            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center text-white font-extrabold text-xl shadow-sm">
-              R
-            </div>
-            <span className="text-2xl font-extrabold tracking-tight text-slate-950 uppercase">
-              RIUTEK
-            </span>
+            <BrandLogo className="h-12 w-auto group-hover:scale-105 transition-transform" />
           </Link>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
             Đăng Nhập Tài Khoản
@@ -226,14 +222,25 @@ export const LoginPage: React.FC = () => {
           </form>
 
           {/* Safe Navigation Back */}
-          <div className="pt-2 text-center border-t border-slate-100">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Quay lại trang chủ</span>
-            </Link>
+          <div className="pt-2 text-center border-t border-slate-100 space-y-2">
+            <p className="text-xs text-slate-600">
+              Chưa có tài khoản?{' '}
+              <Link
+                to="/register"
+                className="font-bold text-red-600 hover:text-red-700 hover:underline"
+              >
+                Đăng ký ngay
+              </Link>
+            </p>
+            <div>
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-800 transition-colors"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Quay lại trang chủ</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>

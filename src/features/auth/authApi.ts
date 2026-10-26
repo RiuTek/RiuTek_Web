@@ -1,5 +1,11 @@
 import { apiClient } from '../../lib/api'
-import type { AuthResponse, LoginRequest } from './authTypes'
+import type {
+  AuthResponse,
+  AuthUser,
+  LoginRequest,
+  RegisterRequest,
+  UpdateProfileRequest,
+} from './authTypes'
 
 let activeRefreshPromise: Promise<AuthResponse> | null = null
 
@@ -11,6 +17,29 @@ export function login(
   signal?: AbortSignal
 ): Promise<AuthResponse> {
   return apiClient.post<AuthResponse>('/auth/login', request, { signal })
+}
+
+/**
+ * Đăng ký tài khoản Customer mới.
+ * Không gửi kèm Bearer token. Trả về AuthResponse và Backend đặt HttpOnly refresh cookie.
+ */
+export function register(
+  request: RegisterRequest,
+  signal?: AbortSignal
+): Promise<AuthResponse> {
+  return apiClient.post<AuthResponse>('/auth/register', request, { signal })
+}
+
+/**
+ * Cập nhật thông tin tài khoản cơ bản (họ tên, số điện thoại).
+ * Gửi Bearer token qua header Authorization.
+ */
+export function updateProfile(
+  request: UpdateProfileRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<AuthUser> {
+  return apiClient.put<AuthUser>('/users/me', request, { token, signal })
 }
 
 /**

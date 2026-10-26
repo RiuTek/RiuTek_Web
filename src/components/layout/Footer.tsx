@@ -1,5 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
+import { BrandLogo } from '../branding/BrandLogo'
 
 export const Footer: React.FC = () => {
   return (
@@ -8,14 +9,13 @@ export const Footer: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-12">
           {/* Brand Info */}
           <div className="md:col-span-1 space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center text-white font-extrabold text-base">
-                R
-              </div>
-              <span className="text-xl font-extrabold tracking-tight text-white uppercase">
-                RIUTEK <span className="text-xs px-2 py-0.5 rounded-full bg-red-950 text-red-400 border border-red-900 font-bold ml-1">APEX</span>
-              </span>
-            </div>
+            <Link
+              to="/"
+              className="inline-flex items-center group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl"
+              aria-label="Trang chủ RiuTek"
+            >
+              <BrandLogo className="h-10 w-auto group-hover:scale-105 transition-transform" />
+            </Link>
             <p className="text-sm text-slate-400 leading-relaxed">
               Nền tảng thương mại điện tử chuyên sâu về linh kiện máy tính, hệ thống PC Gaming và máy trạm đồ họa, tính toán hiệu năng cao.
             </p>
@@ -81,12 +81,17 @@ export const Footer: React.FC = () => {
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
                 <Link to="/login" className="hover:text-red-400 transition-colors">
-                  Đăng Nhập / Đăng Ký
+                  Đăng Nhập
                 </Link>
               </li>
               <li>
-                <Link to="/cart" className="hover:text-red-400 transition-colors">
-                  Quản Lý Đơn Hàng
+                <Link to="/register" className="hover:text-red-400 transition-colors">
+                  Đăng Ký Tài Khoản
+                </Link>
+              </li>
+              <li>
+                <Link to="/account" className="hover:text-red-400 transition-colors">
+                  Tài Khoản Của Tôi
                 </Link>
               </li>
             </ul>

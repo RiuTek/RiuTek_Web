@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../features/auth/AuthContext'
 import { USER_ROLE_LABELS } from '../../features/auth/authTypes'
+import { BrandLogo } from '../branding/BrandLogo'
 
 export const Header: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -53,21 +54,13 @@ export const Header: React.FC = () => {
 
       {/* 2. Main Navigation Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between gap-4">
-        {/* Brand Wordmark */}
+        {/* Brand Logo */}
         <Link
           to="/"
-          className="flex items-center gap-2 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-full px-1"
+          className="flex items-center gap-2 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl px-1 py-0.5"
           aria-label="Trang chủ RiuTek"
         >
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-red-600 to-red-800 flex items-center justify-center text-white font-extrabold text-lg shadow-sm group-hover:scale-105 transition-transform">
-            R
-          </div>
-          <span className="text-xl sm:text-2xl font-extrabold tracking-tight text-slate-950 uppercase flex items-center gap-1.5">
-            RIUTEK
-            <span className="text-[10px] tracking-wider px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200 font-bold">
-              APEX
-            </span>
-          </span>
+          <BrandLogo className="h-9 w-auto group-hover:scale-105 transition-transform" />
         </Link>
 
         {/* Desktop Navigation Links */}
@@ -140,15 +133,29 @@ export const Header: React.FC = () => {
               </button>
             </div>
           ) : status === 'authenticated' && user ? (
-            <div className="flex items-center gap-2">
-              <div className="flex flex-col text-right">
-                <span className="text-xs font-bold text-slate-900 max-w-[120px] sm:max-w-[160px] truncate leading-tight">
-                  {user.fullName}
-                </span>
-                <span className="text-[10px] text-slate-500 font-medium leading-tight">
-                  {USER_ROLE_LABELS[user.role] ?? 'Khách hàng'}
-                </span>
-              </div>
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <Link
+                to="/account"
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                  isActive('/account')
+                    ? 'bg-red-50 border border-red-200 text-red-600'
+                    : 'hover:bg-slate-50 text-slate-900'
+                }`}
+                aria-label="Tài khoản của tôi"
+                title="Quản lý tài khoản"
+              >
+                <div className="w-7 h-7 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                  {user.fullName ? user.fullName.charAt(0).toUpperCase() : 'U'}
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-xs font-bold text-slate-900 max-w-[110px] sm:max-w-[150px] truncate leading-tight">
+                    {user.fullName}
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-medium leading-tight">
+                    {USER_ROLE_LABELS[user.role] ?? 'Không xác định'}
+                  </span>
+                </div>
+              </Link>
               <button
                 type="button"
                 onClick={handleLogout}
@@ -161,13 +168,21 @@ export const Header: React.FC = () => {
               </button>
             </div>
           ) : (
-            <Link
-              to="/login"
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-slate-900 text-white text-xs sm:text-sm font-semibold hover:bg-red-600 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-            >
-              <LogIn className="w-4 h-4" />
-              <span>Đăng Nhập</span>
-            </Link>
+            <div className="flex items-center gap-1.5">
+              <Link
+                to="/login"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-900 text-white text-xs sm:text-sm font-semibold hover:bg-red-600 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>Đăng Nhập</span>
+              </Link>
+              <Link
+                to="/register"
+                className="hidden sm:inline-flex items-center px-3.5 py-2 rounded-full bg-slate-100 text-slate-800 text-xs sm:text-sm font-semibold hover:bg-slate-200 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                <span>Đăng Ký</span>
+              </Link>
+            </div>
           )}
 
           {/* Mobile Menu Toggle */}
@@ -306,14 +321,27 @@ export const Header: React.FC = () => {
                 </div>
               ) : status === 'authenticated' && user ? (
                 <div className="space-y-2">
-                  <div className="px-4 py-2 bg-slate-50 rounded-xl">
-                    <p className="text-xs font-bold text-slate-900 truncate">
-                      {user.fullName}
-                    </p>
+                  <Link
+                    to="/account"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`block px-4 py-2.5 rounded-xl transition-colors ${
+                      isActive('/account')
+                        ? 'bg-red-50 border border-red-200 text-red-600'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {user.fullName}
+                      </p>
+                      <span className="text-[10px] font-semibold text-red-600">
+                        Tài khoản &rarr;
+                      </span>
+                    </div>
                     <p className="text-[11px] text-slate-500 font-medium">
-                      {USER_ROLE_LABELS[user.role] ?? 'Khách hàng'} • {user.email}
+                      {USER_ROLE_LABELS[user.role] ?? 'Không xác định'} • {user.email}
                     </p>
-                  </div>
+                  </Link>
                   <button
                     type="button"
                     onClick={handleLogout}
@@ -325,14 +353,23 @@ export const Header: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <Link
-                  to="/login"
-                  onClick={() => setMobileMenuOpen(false)}
-                  className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                >
-                  <LogIn className="w-4 h-4" />
-                  <span>Đăng Nhập</span>
-                </Link>
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    to="/login"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2 border border-slate-200"
+                  >
+                    <LogIn className="w-4 h-4" />
+                    <span>Đăng Nhập</span>
+                  </Link>
+                  <Link
+                    to="/register"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="px-4 py-2.5 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 flex items-center justify-center gap-2 shadow-xs"
+                  >
+                    <span>Đăng Ký</span>
+                  </Link>
+                </div>
               )}
             </div>
           </div>

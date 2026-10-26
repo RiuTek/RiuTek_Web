@@ -4,6 +4,8 @@ import { HomePage } from '../pages/HomePage'
 import { ProductsPage } from '../pages/ProductsPage'
 import { ProductDetailPage } from '../pages/ProductDetailPage'
 import { LoginPage } from '../pages/LoginPage'
+import { RegisterPage } from '../pages/RegisterPage'
+import { AccountPage } from '../pages/AccountPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -39,6 +41,18 @@ export const router = createBrowserRouter([
       {
         path: '/login',
         element: <LoginPage />,
+      },
+      {
+        path: '/register',
+        element: <RegisterPage />,
+      },
+      {
+        path: '/account',
+        element: (
+          <RequireAuth>
+            <AccountPage />
+          </RequireAuth>
+        ),
       },
       {
         path: '*',

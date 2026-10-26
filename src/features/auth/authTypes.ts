@@ -24,6 +24,18 @@ export interface LoginRequest {
   password: string
 }
 
+export interface RegisterRequest {
+  fullName: string
+  email: string
+  password: string
+  phoneNumber: string | null
+}
+
+export interface UpdateProfileRequest {
+  fullName: string
+  phoneNumber: string | null
+}
+
 export type AuthStatus =
   | 'checking'
   | 'authenticated'
