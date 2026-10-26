@@ -116,7 +116,9 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ user, updateProfile }) => {
         fullName: cleanName,
         phoneNumber: payloadPhone,
       })
-      // Cập nhật baseline theo dữ liệu vừa lưu thành công -> form trở về trạng thái clean
+      // Cập nhật giá trị trường và baseline theo dữ liệu sạch vừa lưu -> form trở về clean
+      setFullName(cleanName)
+      setPhoneNumber(cleanPhone)
       setBaseline({
         fullName: cleanName,
         phoneNumber: cleanPhone,

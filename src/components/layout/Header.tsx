@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '../../features/auth/AuthContext'
 import { USER_ROLE_LABELS } from '../../features/auth/authTypes'
+import { useCart } from '../../features/cart/CartContext'
 import { BrandLogo } from '../branding/BrandLogo'
 
 export const Header: React.FC = () => {
@@ -23,6 +24,10 @@ export const Header: React.FC = () => {
 
   const location = useLocation()
   const { status, user, logout, retryBootstrap } = useAuth()
+  const { itemCount, status: cartStatus } = useCart()
+
+  const showBadge = status === 'authenticated' && cartStatus === 'ready' && itemCount > 0
+  const badgeText = itemCount > 99 ? '99+' : String(itemCount)
 
   const isActive = (path: string) => location.pathname === path
   const isProductsActive = location.pathname.startsWith('/products')
@@ -107,13 +112,25 @@ export const Header: React.FC = () => {
 
         {/* Actions */}
         <div className="flex items-center gap-2 sm:gap-3">
-          {/* Cart Link (bỏ badge số 0 hardcode) */}
+          {/* Cart Link with Live Real Badge */}
           <Link
             to="/cart"
-            className="p-2 rounded-full text-slate-700 hover:text-red-600 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-            aria-label="Xem giỏ hàng"
+            className="p-2 rounded-full text-slate-700 hover:text-red-600 hover:bg-red-50 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 relative"
+            aria-label={
+              showBadge
+                ? `Xem giỏ hàng (${itemCount} sản phẩm)`
+                : 'Xem giỏ hàng'
+            }
           >
             <ShoppingCart className="w-5 h-5" />
+            {showBadge && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[10px] font-black rounded-full flex items-center justify-center leading-none border-2 border-white shadow-xs"
+              >
+                {badgeText}
+              </span>
+            )}
           </Link>
 
           {/* Desktop Account Area theo 4 trạng thái auth */}
@@ -302,8 +319,20 @@ export const Header: React.FC = () => {
               className={`px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-between ${
                 isActive('/cart') ? 'bg-red-50 text-red-600' : 'text-slate-700 hover:bg-slate-50'
               }`}
+              aria-label={
+                showBadge
+                  ? `Giỏ Hàng (${itemCount} sản phẩm)`
+                  : 'Giỏ Hàng'
+              }
             >
-              <span>Giỏ Hàng</span>
+              <div className="flex items-center gap-2">
+                <span>Giỏ Hàng</span>
+                {showBadge && (
+                  <span className="px-2 py-0.5 bg-red-50 text-red-600 border border-red-200 text-xs font-bold rounded-full">
+                    {badgeText}
+                  </span>
+                )}
+              </div>
               <ShoppingCart className="w-4 h-4 text-slate-500" />
             </Link>
 

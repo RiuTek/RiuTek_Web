@@ -10,6 +10,7 @@ import {
   ProductDetailNotFound,
   ProductDetailSkeleton,
 } from '../features/products/components/ProductDetailState'
+import { ProductAddToCart } from '../features/cart/components/ProductAddToCart'
 
 export const ProductDetailPage: React.FC = () => {
   const { product, isLoading, error, isNotFound, retry } = useProductDetail()
@@ -138,6 +139,9 @@ export const ProductDetailPage: React.FC = () => {
               )}
             </div>
           </div>
+
+          {/* Add to Cart CTA */}
+          <ProductAddToCart product={product} />
 
           {/* Business Info / Status Banner */}
           <div className="p-4 rounded-xl border border-slate-200 bg-white text-xs text-slate-600 flex items-start gap-3">

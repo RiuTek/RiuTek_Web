@@ -6,6 +6,7 @@ import { ProductDetailPage } from '../pages/ProductDetailPage'
 import { LoginPage } from '../pages/LoginPage'
 import { RegisterPage } from '../pages/RegisterPage'
 import { AccountPage } from '../pages/AccountPage'
+import { CartPage } from '../pages/CartPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -34,7 +35,7 @@ export const router = createBrowserRouter([
         path: '/cart',
         element: (
           <RequireAuth>
-            <ComingSoonPage />
+            <CartPage />
           </RequireAuth>
         ),
       },
