@@ -1,7 +1,12 @@
 import React from 'react'
 import { RouterProvider } from 'react-router-dom'
 import { router } from './router'
+import { AuthProvider } from '../features/auth/AuthProvider'
 
 export const App: React.FC = () => {
-  return <RouterProvider router={router} />
+  return (
+    <AuthProvider>
+      <RouterProvider router={router} />
+    </AuthProvider>
+  )
 }

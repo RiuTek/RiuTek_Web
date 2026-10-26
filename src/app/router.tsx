@@ -3,8 +3,10 @@ import { PublicLayout } from '../layouts/PublicLayout'
 import { HomePage } from '../pages/HomePage'
 import { ProductsPage } from '../pages/ProductsPage'
 import { ProductDetailPage } from '../pages/ProductDetailPage'
+import { LoginPage } from '../pages/LoginPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
+import { RequireAuth } from '../features/auth/RequireAuth'
 
 export const router = createBrowserRouter([
   {
@@ -28,11 +30,15 @@ export const router = createBrowserRouter([
       },
       {
         path: '/cart',
-        element: <ComingSoonPage />,
+        element: (
+          <RequireAuth>
+            <ComingSoonPage />
+          </RequireAuth>
+        ),
       },
       {
         path: '/login',
-        element: <ComingSoonPage />,
+        element: <LoginPage />,
       },
       {
         path: '*',
