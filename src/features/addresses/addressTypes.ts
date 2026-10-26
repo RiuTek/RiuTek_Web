@@ -31,6 +31,10 @@ export interface UpdateAddressRequest {
 
 export type AddressStatus = 'idle' | 'loading' | 'ready' | 'error'
 
+export type AddressMutationResult =
+  | { refreshed: true }
+  | { refreshed: false; warning: string }
+
 export const ADDRESS_ERROR_MESSAGES: Record<string, string> = {
   'UserAddress.NotFound': 'Không tìm thấy địa chỉ hoặc địa chỉ không còn tồn tại.',
   'User.Unauthorized': 'Vui lòng đăng nhập lại để quản lý địa chỉ.',

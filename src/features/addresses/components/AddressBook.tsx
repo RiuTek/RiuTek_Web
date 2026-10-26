@@ -3,6 +3,7 @@ import {
   Plus,
   MapPin,
   AlertCircle,
+  AlertTriangle,
   CheckCircle2,
   RefreshCw,
   Loader2,
@@ -11,6 +12,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { useAddresses } from '../AddressContext'
 import type {
   AddAddressRequest,
+  AddressMutationResult,
   UpdateAddressRequest,
   UserAddressDto,
 } from '../addressTypes'
@@ -38,11 +40,14 @@ export const AddressBook: React.FC = () => {
   const [formError, setFormError] = useState<string | null>(null)
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null)
   const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null)
+  const [warningMessage, setWarningMessage] = useState<string | null>(null)
+  const [isReloading, setIsReloading] = useState(false)
 
   const handleOpenAdd = () => {
     setFormError(null)
     setActionSuccessMessage(null)
     setActionErrorMessage(null)
+    setWarningMessage(null)
     clearError()
     setEditingAddress(null)
     setFormMode('add')
@@ -52,6 +57,7 @@ export const AddressBook: React.FC = () => {
     setFormError(null)
     setActionSuccessMessage(null)
     setActionErrorMessage(null)
+    setWarningMessage(null)
     clearError()
     setEditingAddress(address)
     setFormMode('edit')
@@ -70,17 +76,33 @@ export const AddressBook: React.FC = () => {
     setFormError(null)
     setActionSuccessMessage(null)
     setActionErrorMessage(null)
+    setWarningMessage(null)
 
     try {
+      let result: AddressMutationResult
       if (formMode === 'add') {
-        await addAddress(data as AddAddressRequest)
-        setActionSuccessMessage('Thêm địa chỉ giao hàng mới thành công.')
+        result = await addAddress(data as AddAddressRequest)
       } else if (formMode === 'edit' && editingAddress) {
-        await updateAddress(editingAddress.id, data as UpdateAddressRequest)
-        setActionSuccessMessage('Cập nhật địa chỉ giao hàng thành công.')
+        result = await updateAddress(editingAddress.id, data as UpdateAddressRequest)
+      } else {
+        return
       }
+
+      // Đóng form ngay lập tức khi mutation đã thành công trên server để chặn double-submit/replay
       handleCloseForm()
+
+      if (result.refreshed) {
+        setActionSuccessMessage(
+          formMode === 'add'
+            ? 'Thêm địa chỉ giao hàng mới thành công.'
+            : 'Cập nhật địa chỉ giao hàng thành công.'
+        )
+      } else {
+        // Mutation đã lưu thành công nhưng refetch thất bại -> hiển thị warning, không báo thành công gây hiểu nhầm
+        setWarningMessage(result.warning)
+      }
     } catch (err) {
+      // Mutation thật sự thất bại: giữ form mở, giữ dữ liệu và hiển thị lỗi để user sửa lại
       const msg =
         err instanceof Error
           ? err.message
@@ -94,10 +116,15 @@ export const AddressBook: React.FC = () => {
   const handleSetDefault = async (addressId: string) => {
     setActionSuccessMessage(null)
     setActionErrorMessage(null)
+    setWarningMessage(null)
     clearError()
     try {
-      await setDefaultAddress(addressId)
-      setActionSuccessMessage('Đã thiết lập địa chỉ mặc định thành công.')
+      const result = await setDefaultAddress(addressId)
+      if (result.refreshed) {
+        setActionSuccessMessage('Đã thiết lập địa chỉ mặc định thành công.')
+      } else {
+        setWarningMessage(result.warning)
+      }
     } catch (err) {
       const msg =
         err instanceof Error
@@ -110,10 +137,15 @@ export const AddressBook: React.FC = () => {
   const handleDelete = async (addressId: string) => {
     setActionSuccessMessage(null)
     setActionErrorMessage(null)
+    setWarningMessage(null)
     clearError()
     try {
-      await deleteAddress(addressId)
-      setActionSuccessMessage('Đã xóa địa chỉ giao hàng thành công.')
+      const result = await deleteAddress(addressId)
+      if (result.refreshed) {
+        setActionSuccessMessage('Đã xóa địa chỉ giao hàng thành công.')
+      } else {
+        setWarningMessage(result.warning)
+      }
     } catch (err) {
       const msg =
         err instanceof Error
@@ -123,11 +155,17 @@ export const AddressBook: React.FC = () => {
     }
   }
 
-  const handleRetryLoad = () => {
+  const handleRetryLoad = async () => {
+    setIsReloading(true)
     setActionErrorMessage(null)
-    loadAddresses().catch(() => {
-      // Error is caught and surfaced in context status/error
-    })
+    try {
+      await loadAddresses()
+      setWarningMessage(null)
+    } catch {
+      // Error được ghi nhận trong context status/error
+    } finally {
+      setIsReloading(false)
+    }
   }
 
   const defaultPrefill = {
@@ -170,6 +208,32 @@ export const AddressBook: React.FC = () => {
         >
           <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
           <span className="font-semibold">{actionSuccessMessage}</span>
+        </div>
+      )}
+
+      {/* Warning: Mutation saved but refetch failed */}
+      {warningMessage && (
+        <div
+          role="alert"
+          className="p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <span className="font-medium">{warningMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleRetryLoad}
+            disabled={isReloading || isMutating}
+            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5 self-start sm:self-auto flex-shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            {isReloading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            <span>Tải lại danh sách</span>
+          </button>
         </div>
       )}
 
@@ -233,9 +297,14 @@ export const AddressBook: React.FC = () => {
           <button
             type="button"
             onClick={handleRetryLoad}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-colors shadow-xs"
+            disabled={isReloading || isMutating}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition-colors shadow-xs disabled:opacity-50"
           >
-            <RefreshCw className="w-4 h-4" />
+            {isReloading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
             <span>Thử lại</span>
           </button>
         </div>

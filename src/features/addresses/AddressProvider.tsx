@@ -18,6 +18,7 @@ import { AddressContext, type AddressContextValue } from './AddressContext'
 import {
   ADDRESS_ERROR_MESSAGES,
   type AddAddressRequest,
+  type AddressMutationResult,
   type AddressStatus,
   type UpdateAddressRequest,
   type UserAddressDto,
@@ -154,29 +155,32 @@ const AddressSessionProvider: React.FC<AddressProviderProps> = ({ children }) =>
   }, [authStatus, loadAddressesInternal])
 
   /**
-   * Thêm địa chỉ mới và refetch lại danh sách từ server
+   * Helper private thực thi mutation, sau đó thử refetch danh sách.
+   * - Nếu mutation lỗi: map error, set error state và throw để caller xử lý (giữ form mở).
+   * - Nếu mutation thành công và refetch thành công: trả { refreshed: true }.
+   * - Nếu mutation thành công nhưng refetch lỗi: trả { refreshed: false, warning } mà không replay mutation.
    */
-  const addAddress = useCallback(
-    async (request: AddAddressRequest): Promise<void> => {
-      if (authStatus !== 'authenticated') {
-        throw new Error('Vui lòng đăng nhập để thêm địa chỉ.')
-      }
-
+  const executeMutationAndRefetch = useCallback(
+    async (
+      mutationFn: () => Promise<unknown>
+    ): Promise<AddressMutationResult> => {
       setIsMutating(true)
       let mutationSucceeded = false
       try {
-        await withAuthRetry((token) => apiAddAddress(request, token))
+        await mutationFn()
         mutationSucceeded = true
         await loadAddressesInternal()
+        return { refreshed: true }
       } catch (err) {
         if (mutationSucceeded) {
-          const msg =
-            'Thao tác đã được lưu nhưng không thể tải lại danh sách địa chỉ mới nhất. Vui lòng thử tải lại.'
-          if (isMountedRef.current) setError(msg)
-          throw new Error(msg, { cause: err })
+          const warning =
+            'Thay đổi đã được lưu nhưng chưa thể tải lại danh sách địa chỉ mới nhất. Vui lòng tải lại danh sách.'
+          return { refreshed: false, warning }
         }
         const friendlyMessage = mapAddressError(err)
-        if (isMountedRef.current) setError(friendlyMessage)
+        if (isMountedRef.current) {
+          setError(friendlyMessage)
+        }
         throw new Error(friendlyMessage, { cause: err })
       } finally {
         if (isMountedRef.current) {
@@ -184,109 +188,74 @@ const AddressSessionProvider: React.FC<AddressProviderProps> = ({ children }) =>
         }
       }
     },
-    [authStatus, withAuthRetry, loadAddressesInternal]
+    [loadAddressesInternal]
+  )
+
+  /**
+   * Thêm địa chỉ mới và refetch lại danh sách từ server
+   */
+  const addAddress = useCallback(
+    async (request: AddAddressRequest): Promise<AddressMutationResult> => {
+      if (authStatus !== 'authenticated') {
+        throw new Error('Vui lòng đăng nhập để thêm địa chỉ.')
+      }
+
+      return executeMutationAndRefetch(() =>
+        withAuthRetry((token) => apiAddAddress(request, token))
+      )
+    },
+    [authStatus, withAuthRetry, executeMutationAndRefetch]
   )
 
   /**
    * Cập nhật địa chỉ và refetch lại danh sách từ server
    */
   const updateAddress = useCallback(
-    async (id: string, request: UpdateAddressRequest): Promise<void> => {
+    async (
+      id: string,
+      request: UpdateAddressRequest
+    ): Promise<AddressMutationResult> => {
       if (authStatus !== 'authenticated') {
         throw new Error('Vui lòng đăng nhập để cập nhật địa chỉ.')
       }
 
-      setIsMutating(true)
-      let mutationSucceeded = false
-      try {
-        await withAuthRetry((token) => apiUpdateAddress(id, request, token))
-        mutationSucceeded = true
-        await loadAddressesInternal()
-      } catch (err) {
-        if (mutationSucceeded) {
-          const msg =
-            'Thao tác đã được lưu nhưng không thể tải lại danh sách địa chỉ mới nhất. Vui lòng thử tải lại.'
-          if (isMountedRef.current) setError(msg)
-          throw new Error(msg, { cause: err })
-        }
-        const friendlyMessage = mapAddressError(err)
-        if (isMountedRef.current) setError(friendlyMessage)
-        throw new Error(friendlyMessage, { cause: err })
-      } finally {
-        if (isMountedRef.current) {
-          setIsMutating(false)
-        }
-      }
+      return executeMutationAndRefetch(() =>
+        withAuthRetry((token) => apiUpdateAddress(id, request, token))
+      )
     },
-    [authStatus, withAuthRetry, loadAddressesInternal]
+    [authStatus, withAuthRetry, executeMutationAndRefetch]
   )
 
   /**
    * Đặt địa chỉ làm mặc định và refetch lại danh sách từ server
    */
   const setDefaultAddress = useCallback(
-    async (id: string): Promise<void> => {
+    async (id: string): Promise<AddressMutationResult> => {
       if (authStatus !== 'authenticated') {
         throw new Error('Vui lòng đăng nhập để thay đổi địa chỉ mặc định.')
       }
 
-      setIsMutating(true)
-      let mutationSucceeded = false
-      try {
-        await withAuthRetry((token) => apiSetDefaultAddress(id, token))
-        mutationSucceeded = true
-        await loadAddressesInternal()
-      } catch (err) {
-        if (mutationSucceeded) {
-          const msg =
-            'Thao tác đã được lưu nhưng không thể tải lại danh sách địa chỉ mới nhất. Vui lòng thử tải lại.'
-          if (isMountedRef.current) setError(msg)
-          throw new Error(msg, { cause: err })
-        }
-        const friendlyMessage = mapAddressError(err)
-        if (isMountedRef.current) setError(friendlyMessage)
-        throw new Error(friendlyMessage, { cause: err })
-      } finally {
-        if (isMountedRef.current) {
-          setIsMutating(false)
-        }
-      }
+      return executeMutationAndRefetch(() =>
+        withAuthRetry((token) => apiSetDefaultAddress(id, token))
+      )
     },
-    [authStatus, withAuthRetry, loadAddressesInternal]
+    [authStatus, withAuthRetry, executeMutationAndRefetch]
   )
 
   /**
    * Xóa địa chỉ và refetch lại danh sách từ server
    */
   const deleteAddress = useCallback(
-    async (id: string): Promise<void> => {
+    async (id: string): Promise<AddressMutationResult> => {
       if (authStatus !== 'authenticated') {
         throw new Error('Vui lòng đăng nhập để xóa địa chỉ.')
       }
 
-      setIsMutating(true)
-      let mutationSucceeded = false
-      try {
-        await withAuthRetry((token) => apiDeleteAddress(id, token))
-        mutationSucceeded = true
-        await loadAddressesInternal()
-      } catch (err) {
-        if (mutationSucceeded) {
-          const msg =
-            'Thao tác đã được lưu nhưng không thể tải lại danh sách địa chỉ mới nhất. Vui lòng thử tải lại.'
-          if (isMountedRef.current) setError(msg)
-          throw new Error(msg, { cause: err })
-        }
-        const friendlyMessage = mapAddressError(err)
-        if (isMountedRef.current) setError(friendlyMessage)
-        throw new Error(friendlyMessage, { cause: err })
-      } finally {
-        if (isMountedRef.current) {
-          setIsMutating(false)
-        }
-      }
+      return executeMutationAndRefetch(() =>
+        withAuthRetry((token) => apiDeleteAddress(id, token))
+      )
     },
-    [authStatus, withAuthRetry, loadAddressesInternal]
+    [authStatus, withAuthRetry, executeMutationAndRefetch]
   )
 
   const clearError = useCallback(() => {

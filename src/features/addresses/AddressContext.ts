@@ -1,6 +1,7 @@
 import { createContext, useContext } from 'react'
 import type {
   AddAddressRequest,
+  AddressMutationResult,
   AddressStatus,
   UpdateAddressRequest,
   UserAddressDto,
@@ -12,10 +13,10 @@ export interface AddressContextValue {
   error: string | null
   isMutating: boolean
   loadAddresses: () => Promise<void>
-  addAddress: (request: AddAddressRequest) => Promise<void>
-  updateAddress: (id: string, request: UpdateAddressRequest) => Promise<void>
-  setDefaultAddress: (id: string) => Promise<void>
-  deleteAddress: (id: string) => Promise<void>
+  addAddress: (request: AddAddressRequest) => Promise<AddressMutationResult>
+  updateAddress: (id: string, request: UpdateAddressRequest) => Promise<AddressMutationResult>
+  setDefaultAddress: (id: string) => Promise<AddressMutationResult>
+  deleteAddress: (id: string) => Promise<AddressMutationResult>
   clearError: () => void
 }
 
