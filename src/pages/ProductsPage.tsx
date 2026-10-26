@@ -16,6 +16,8 @@ export const ProductsPage: React.FC = () => {
     products,
     pagedResult,
     categories,
+    isCategoriesLoading,
+    categoriesError,
     isLoading,
     error,
     priceError,
@@ -45,7 +47,7 @@ export const ProductsPage: React.FC = () => {
           Danh Mục Linh Kiện Máy Tính
         </h1>
         <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
-          Khám phá danh sách linh kiện phần cứng chính hãng, máy trạm và linh kiện ráp máy tính với thông số chi tiết và giá niêm yết minh bạch.
+          Khám phá danh sách linh kiện PC, máy trạm và phụ kiện với thông số chi tiết, giá bán và tình trạng kho rõ ràng.
         </p>
       </div>
 
@@ -55,6 +57,8 @@ export const ProductsPage: React.FC = () => {
         <ProductFilters
           filters={filters}
           categories={categories}
+          isCategoriesLoading={isCategoriesLoading}
+          categoriesError={categoriesError}
           priceError={priceError}
           onUpdateFilters={updateFilters}
           onResetFilters={resetFilters}
@@ -87,10 +91,9 @@ export const ProductsPage: React.FC = () => {
                 id="desktop-sort"
                 value={filters.sortBy}
                 onChange={(e) =>
-                  updateFilters(
-                    { sortBy: parseInt(e.target.value, 10) as ProductSortOption },
-                    false
-                  )
+                  updateFilters({
+                    sortBy: parseInt(e.target.value, 10) as ProductSortOption,
+                  })
                 }
                 className="bg-white border border-slate-200 rounded-xl py-1.5 px-3 text-xs text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-red-500 shadow-2xs"
               >

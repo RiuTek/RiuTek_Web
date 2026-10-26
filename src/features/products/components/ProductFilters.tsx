@@ -7,6 +7,7 @@ import {
   Layers,
   X,
 } from 'lucide-react'
+import type { ApiError } from '../../../lib/api'
 import {
   COMPONENT_TYPE_LABELS,
   SORT_OPTION_LABELS,
@@ -21,6 +22,8 @@ import type { ParsedFilters } from '../useProductCatalog'
 interface ProductFiltersProps {
   filters: ParsedFilters
   categories: Category[]
+  isCategoriesLoading?: boolean
+  categoriesError?: ApiError | Error | null
   priceError: string | null
   onUpdateFilters: (
     newParams: Partial<Record<keyof ParsedFilters, string | number | boolean | undefined | null>>,
@@ -32,6 +35,8 @@ interface ProductFiltersProps {
 const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
   filters,
   categories,
+  isCategoriesLoading = false,
+  categoriesError = null,
   priceError,
   onUpdateFilters,
   onResetFilters,
@@ -54,11 +59,17 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
 
   const handlePriceApply = (e: React.FormEvent) => {
     e.preventDefault()
-    const parsedMin = minPriceInput ? parseFloat(minPriceInput) : undefined
-    const parsedMax = maxPriceInput ? parseFloat(maxPriceInput) : undefined
+    const parsedMin = minPriceInput.trim() ? parseFloat(minPriceInput) : undefined
+    const parsedMax = maxPriceInput.trim() ? parseFloat(maxPriceInput) : undefined
     onUpdateFilters({
-      minPrice: !isNaN(parsedMin!) && parsedMin! >= 0 ? parsedMin : undefined,
-      maxPrice: !isNaN(parsedMax!) && parsedMax! >= 0 ? parsedMax : undefined,
+      minPrice:
+        parsedMin !== undefined && !Number.isNaN(parsedMin) && parsedMin >= 0
+          ? parsedMin
+          : undefined,
+      maxPrice:
+        parsedMax !== undefined && !Number.isNaN(parsedMax) && parsedMax >= 0
+          ? parsedMax
+          : undefined,
     })
   }
 
@@ -93,16 +104,19 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
     )
   }
 
-  const filterContent = (
+  const renderFilterContent = (idPrefix: 'desktop' | 'mobile') => (
     <div className="space-y-6 text-sm">
       {/* 1. Keyword Search */}
       <div>
-        <label htmlFor="search-input" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+        <label
+          htmlFor={`${idPrefix}-search-input`}
+          className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2"
+        >
           Tìm Kiếm Tên Linh Kiện
         </label>
         <form onSubmit={handleSearchSubmit} className="relative">
           <input
-            id="search-input"
+            id={`${idPrefix}-search-input`}
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
@@ -138,29 +152,44 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
           )}
         </div>
 
-        <div className="max-h-56 overflow-y-auto space-y-0.5 border border-slate-200/80 rounded-xl p-2 bg-slate-50/50">
-          <button
-            type="button"
-            onClick={() => onUpdateFilters({ categoryId: undefined })}
-            className={`w-full text-left text-xs py-1.5 px-2 rounded-lg transition-colors ${
-              !filters.categoryId
-                ? 'bg-red-50 text-red-600 font-bold'
-                : 'text-slate-700 hover:bg-slate-100'
-            }`}
-          >
-            Tất cả danh mục
-          </button>
-          {categories.map((cat) => renderCategoryItem(cat, 0))}
-        </div>
+        {isCategoriesLoading ? (
+          <div className="border border-slate-200/80 rounded-xl p-3 bg-slate-50/50 space-y-2">
+            <div className="h-4 bg-slate-200/70 rounded animate-pulse w-3/4" />
+            <div className="h-4 bg-slate-200/70 rounded animate-pulse w-1/2" />
+            <div className="h-4 bg-slate-200/70 rounded animate-pulse w-2/3" />
+          </div>
+        ) : categoriesError ? (
+          <div className="border border-slate-200/80 rounded-xl p-3 bg-slate-50/50 text-xs text-slate-500">
+            <p>Không thể tải danh mục.</p>
+          </div>
+        ) : (
+          <div className="max-h-56 overflow-y-auto space-y-0.5 border border-slate-200/80 rounded-xl p-2 bg-slate-50/50">
+            <button
+              type="button"
+              onClick={() => onUpdateFilters({ categoryId: undefined })}
+              className={`w-full text-left text-xs py-1.5 px-2 rounded-lg transition-colors ${
+                !filters.categoryId
+                  ? 'bg-red-50 text-red-600 font-bold'
+                  : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              Tất cả danh mục
+            </button>
+            {categories.map((cat) => renderCategoryItem(cat, 0))}
+          </div>
+        )}
       </div>
 
       {/* 3. Component Type */}
       <div>
-        <label htmlFor="component-type-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+        <label
+          htmlFor={`${idPrefix}-component-type-select`}
+          className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2"
+        >
           Loại Phần Cứng
         </label>
         <select
-          id="component-type-select"
+          id={`${idPrefix}-component-type-select`}
           value={filters.componentType ?? ''}
           onChange={(e) => {
             const val = e.target.value ? parseInt(e.target.value, 10) : undefined
@@ -179,12 +208,15 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
 
       {/* 4. Brand Input */}
       <div>
-        <label htmlFor="brand-input" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+        <label
+          htmlFor={`${idPrefix}-brand-input`}
+          className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2"
+        >
           Thương Hiệu
         </label>
         <form onSubmit={handleBrandSubmit} className="flex gap-2">
           <input
-            id="brand-input"
+            id={`${idPrefix}-brand-input`}
             type="text"
             value={brandInput}
             onChange={(e) => setBrandInput(e.target.value)}
@@ -209,7 +241,11 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
         <form onSubmit={handlePriceApply} className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <div>
+              <label htmlFor={`${idPrefix}-min-price-input`} className="sr-only">
+                Giá tối thiểu
+              </label>
               <input
+                id={`${idPrefix}-min-price-input`}
                 type="number"
                 min="0"
                 step="50000"
@@ -221,7 +257,11 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
               />
             </div>
             <div>
+              <label htmlFor={`${idPrefix}-max-price-input`} className="sr-only">
+                Giá tối đa
+              </label>
               <input
+                id={`${idPrefix}-max-price-input`}
                 type="number"
                 min="0"
                 step="50000"
@@ -247,11 +287,14 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
 
       {/* 6. Stock Status */}
       <div>
-        <label htmlFor="stock-status-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+        <label
+          htmlFor={`${idPrefix}-stock-status-select`}
+          className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2"
+        >
           Tình Trạng Kho
         </label>
         <select
-          id="stock-status-select"
+          id={`${idPrefix}-stock-status-select`}
           value={
             filters.inStock === undefined
               ? 'all'
@@ -275,11 +318,14 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
 
       {/* 7. Active Business Status */}
       <div>
-        <label htmlFor="active-status-select" className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2">
+        <label
+          htmlFor={`${idPrefix}-active-status-select`}
+          className="block text-xs font-bold text-slate-900 uppercase tracking-wider mb-2"
+        >
           Trạng Thái Kinh Doanh
         </label>
         <select
-          id="active-status-select"
+          id={`${idPrefix}-active-status-select`}
           value={
             filters.isActive === undefined
               ? 'all'
@@ -331,10 +377,9 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
           aria-label="Sắp xếp sản phẩm"
           value={filters.sortBy}
           onChange={(e) =>
-            onUpdateFilters(
-              { sortBy: parseInt(e.target.value, 10) as ProductSortOption },
-              false
-            )
+            onUpdateFilters({
+              sortBy: parseInt(e.target.value, 10) as ProductSortOption,
+            })
           }
           className="bg-slate-50 border border-slate-200 rounded-xl py-1.5 px-3 text-xs text-slate-900 font-medium"
         >
@@ -361,7 +406,7 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
             Xóa hết
           </button>
         </div>
-        {filterContent}
+        {renderFilterContent('desktop')}
       </aside>
 
       {/* Mobile Filters Drawer Modal */}
@@ -388,7 +433,7 @@ const ProductFiltersInner: React.FC<ProductFiltersProps> = ({
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              {filterContent}
+              {renderFilterContent('mobile')}
             </div>
 
             <div className="pt-4 border-t border-slate-100 mt-6">

@@ -29,43 +29,67 @@ export interface ParsedFilters {
   sortBy: ProductSortOption
 }
 
+const GUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
+
+function parseStrictInt(raw: string | null): number | undefined {
+  if (raw === null || raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (trimmed === '' || !/^-?\d+$/.test(trimmed)) return undefined
+  const num = Number(trimmed)
+  if (!Number.isSafeInteger(num)) return undefined
+  return num
+}
+
+function parseStrictFloat(raw: string | null): number | undefined {
+  if (raw === null || raw === undefined) return undefined
+  const trimmed = raw.trim()
+  if (trimmed === '' || !/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) return undefined
+  const num = Number(trimmed)
+  if (!Number.isFinite(num) || num < 0) return undefined
+  return num
+}
+
+function parseStrictGuid(raw: string | null): string {
+  if (raw === null || raw === undefined) return ''
+  const trimmed = raw.trim()
+  return GUID_REGEX.test(trimmed) ? trimmed : ''
+}
+
 function parseFiltersFromSearchParams(searchParams: URLSearchParams): {
   filters: ParsedFilters
   priceError: string | null
 } {
-  const pageIndexRaw = parseInt(searchParams.get('pageIndex') ?? '', 10)
-  const pageIndex = Number.isInteger(pageIndexRaw) && pageIndexRaw >= 1 ? pageIndexRaw : DEFAULT_PAGE_INDEX
+  const pageIndexParsed = parseStrictInt(searchParams.get('pageIndex'))
+  const pageIndex =
+    pageIndexParsed !== undefined && pageIndexParsed >= 1 && pageIndexParsed <= 2147483647
+      ? pageIndexParsed
+      : DEFAULT_PAGE_INDEX
 
-  const pageSizeRaw = parseInt(searchParams.get('pageSize') ?? '', 10)
-  const pageSize = Number.isInteger(pageSizeRaw) && pageSizeRaw >= 1 && pageSizeRaw <= 50
-    ? pageSizeRaw
-    : DEFAULT_PAGE_SIZE
+  const pageSizeParsed = parseStrictInt(searchParams.get('pageSize'))
+  const pageSize =
+    pageSizeParsed !== undefined && pageSizeParsed >= 1 && pageSizeParsed <= 50
+      ? pageSizeParsed
+      : DEFAULT_PAGE_SIZE
 
-  const sortByRaw = parseInt(searchParams.get('sortBy') ?? '', 10)
-  const sortBy = Number.isInteger(sortByRaw) && sortByRaw >= 1 && sortByRaw <= 5
-    ? (sortByRaw as ProductSortOption)
-    : DEFAULT_SORT_BY
+  const sortByParsed = parseStrictInt(searchParams.get('sortBy'))
+  const sortBy =
+    sortByParsed !== undefined && sortByParsed >= 1 && sortByParsed <= 5
+      ? (sortByParsed as ProductSortOption)
+      : DEFAULT_SORT_BY
 
-  const componentTypeRaw = parseInt(searchParams.get('componentType') ?? '', 10)
-  const componentType = Number.isInteger(componentTypeRaw) && componentTypeRaw >= 1 && componentTypeRaw <= 9
-    ? (componentTypeRaw as ComponentType)
-    : undefined
+  const componentTypeParsed = parseStrictInt(searchParams.get('componentType'))
+  const componentType =
+    componentTypeParsed !== undefined && componentTypeParsed >= 1 && componentTypeParsed <= 9
+      ? (componentTypeParsed as ComponentType)
+      : undefined
 
   const searchTerm = (searchParams.get('searchTerm') ?? '').trim().slice(0, 100)
-  const categoryId = (searchParams.get('categoryId') ?? '').trim()
+  const categoryId = parseStrictGuid(searchParams.get('categoryId'))
   const brand = (searchParams.get('brand') ?? '').trim().slice(0, 100)
 
-  let minPrice: number | undefined
-  const minPriceRaw = parseFloat(searchParams.get('minPrice') ?? '')
-  if (!Number.isNaN(minPriceRaw) && minPriceRaw >= 0) {
-    minPrice = minPriceRaw
-  }
-
-  let maxPrice: number | undefined
-  const maxPriceRaw = parseFloat(searchParams.get('maxPrice') ?? '')
-  if (!Number.isNaN(maxPriceRaw) && maxPriceRaw >= 0) {
-    maxPrice = maxPriceRaw
-  }
+  const minPrice = parseStrictFloat(searchParams.get('minPrice'))
+  const maxPrice = parseStrictFloat(searchParams.get('maxPrice'))
 
   let priceError: string | null = null
   if (minPrice !== undefined && maxPrice !== undefined && maxPrice < minPrice) {
@@ -125,22 +149,27 @@ export function useProductCatalog() {
 
   // 1. Fetch Categories once on mount
   useEffect(() => {
+    let isMounted = true
     const controller = new AbortController()
 
     getCategories(controller.signal)
       .then((data) => {
+        if (!isMounted) return
         setCategories(data)
         setCategoriesError(null)
       })
       .catch((err) => {
+        if (!isMounted) return
         if (err instanceof ApiError && err.isAbortError) return
         setCategoriesError(err)
       })
       .finally(() => {
+        if (!isMounted) return
         setIsCategoriesLoading(false)
       })
 
     return () => {
+      isMounted = false
       controller.abort()
     }
   }, [])
