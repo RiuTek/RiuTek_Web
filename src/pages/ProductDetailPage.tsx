@@ -79,6 +79,7 @@ export const ProductDetailPage: React.FC = () => {
         {/* Left: Product Gallery */}
         <section aria-label="Hình ảnh sản phẩm">
           <ProductGallery
+            key={product.id}
             productName={product.name}
             imageUrl={product.imageUrl}
             additionalImages={product.additionalImages}
@@ -144,7 +145,7 @@ export const ProductDetailPage: React.FC = () => {
             <div>
               <p className="font-semibold text-slate-800">Thông tin sản phẩm</p>
               <p className="mt-0.5 text-slate-500 leading-relaxed">
-                Sản phẩm được niêm yết với thông số và tình trạng kho thực tế từ hệ thống kho vận RiuTek.
+                Thông số sản phẩm, giá bán và tình trạng kho được cập nhật từ hệ thống RiuTek.
               </p>
             </div>
           </div>
