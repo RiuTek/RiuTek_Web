@@ -1,5 +1,10 @@
-import { apiClient, type PagedResult } from '../../lib/api'
-import type { Category, ProductFilterParams, ProductSummary } from './productTypes'
+import { apiClient, ApiError, type PagedResult } from '../../lib/api'
+import type {
+  Category,
+  ProductDetail,
+  ProductFilterParams,
+  ProductSummary,
+} from './productTypes'
 
 /**
  * Lấy danh sách sản phẩm phân trang từ RiuTek API qua Vercel reverse proxy
@@ -65,6 +70,23 @@ export async function getProducts(
  */
 export async function getCategories(signal?: AbortSignal): Promise<Category[]> {
   return apiClient.get<Category[]>('/categories', {
+    signal,
+  })
+}
+
+/**
+ * Lấy chi tiết sản phẩm theo slug từ RiuTek API qua Vercel reverse proxy
+ */
+export async function getProductBySlug(
+  slug: string,
+  signal?: AbortSignal
+): Promise<ProductDetail> {
+  const cleanSlug = slug ? slug.trim() : ''
+  if (!cleanSlug || cleanSlug.length > 255) {
+    throw new ApiError({ message: 'Slug không hợp lệ', status: 400 })
+  }
+
+  return apiClient.get<ProductDetail>(`/products/slug/${encodeURIComponent(cleanSlug)}`, {
     signal,
   })
 }

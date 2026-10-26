@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Package, ImageOff } from 'lucide-react'
 import { formatVnd } from '../productConstants'
 import type { ProductSummary } from '../productTypes'
@@ -10,7 +11,7 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const [imgError, setImgError] = useState(false)
 
-  // Status Precedence theo Section 8:
+  // Status Precedence theo Section 8/9:
   // 1. isActive == false -> Ngừng kinh doanh
   // 2. active & stockQuantity <= 0 -> Tạm hết hàng
   // 3. active & stockQuantity > 0 -> Còn hàng
@@ -35,8 +36,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
   const hasDiscount =
     product.originalPrice !== null && product.originalPrice > product.price
 
-  return (
-    <article className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:border-red-300 hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group">
+  const validSlug = product.slug ? product.slug.trim() : ''
+
+  const cardContent = (
+    <article className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:border-red-300 hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group h-full">
       {/* Product Image Stage */}
       <div className="p-4 pb-0">
         <div className="relative w-full aspect-square bg-slate-50 rounded-xl overflow-hidden flex items-center justify-center border border-slate-100">
@@ -108,5 +111,18 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product }) => {
         </div>
       </div>
     </article>
+  )
+
+  if (!validSlug) {
+    return cardContent
+  }
+
+  return (
+    <Link
+      to={`/products/${encodeURIComponent(validSlug)}`}
+      className="block h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-2xl"
+    >
+      {cardContent}
+    </Link>
   )
 }
