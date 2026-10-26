@@ -34,7 +34,7 @@ export const Header: React.FC = () => {
       await logout()
       setMobileMenuOpen(false)
     } catch {
-      setLogoutError('Không thể đăng xuất. Vui lòng thử lại.')
+      setLogoutError('Không thể đăng xuất. Vui lòng kiểm tra kết nối và thử lại.')
     } finally {
       setIsLoggingOut(false)
     }
@@ -183,6 +183,29 @@ export const Header: React.FC = () => {
         </div>
       </div>
 
+      {/* Shared Logout Error Alert (Visible on Desktop & Mobile) */}
+      {logoutError && (
+        <div
+          role="alert"
+          className="bg-rose-50 border-b border-rose-200 text-rose-700 text-xs py-2 px-4 sm:px-6 lg:px-8 shadow-xs"
+        >
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+              <span>{logoutError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLogoutError(null)}
+              className="p-1 hover:bg-rose-100 rounded text-rose-600 hover:text-rose-800 transition-colors"
+              aria-label="Đóng thông báo lỗi đăng xuất"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 3. Sub-Category Quick Ribbon */}
       <div className="bg-slate-900 text-slate-300 text-xs py-2 px-4 sm:px-6 lg:px-8 overflow-x-auto">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-6 whitespace-nowrap min-w-max">
@@ -224,10 +247,6 @@ export const Header: React.FC = () => {
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
         <div className="lg:hidden border-t border-slate-200 bg-white px-4 py-4 space-y-3 shadow-lg">
-          {logoutError && (
-            <p className="text-xs text-rose-600 px-2 font-medium">{logoutError}</p>
-          )}
-
           <div className="flex flex-col gap-1 pt-1">
             <Link
               to="/"
