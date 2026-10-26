@@ -14,7 +14,11 @@ export const Footer: React.FC = () => {
               className="inline-flex items-center group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl"
               aria-label="Trang chủ RiuTek"
             >
-              <BrandLogo className="h-10 w-auto group-hover:scale-105 transition-transform" />
+              <BrandLogo
+                markClassName="h-8 sm:h-9 w-auto group-hover:scale-105 transition-transform"
+                textClassName="text-xl sm:text-2xl"
+                theme="dark"
+              />
             </Link>
             <p className="text-sm text-slate-400 leading-relaxed">
               Nền tảng thương mại điện tử chuyên sâu về linh kiện máy tính, hệ thống PC Gaming và máy trạm đồ họa, tính toán hiệu năng cao.

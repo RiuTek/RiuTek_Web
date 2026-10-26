@@ -34,6 +34,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const accessTokenRef = useRef<string | null>(null)
   const expiresAtRef = useRef<number | null>(null)
 
+  // Helper xóa sạch session trong bộ nhớ khi phiên hết hạn hoặc logout
+  const clearSession = useCallback(() => {
+    accessTokenRef.current = null
+    expiresAtRef.current = null
+    setUser(null)
+    setStatus('anonymous')
+  }, [])
+
   // Helper chuẩn hóa cập nhật phiên làm việc từ AuthResponse
   const applyAuthResponse = useCallback((data: AuthResponse) => {
     accessTokenRef.current = data.accessToken
@@ -54,10 +62,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       .catch((err) => {
         if (!isMounted) return
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          accessTokenRef.current = null
-          expiresAtRef.current = null
-          setUser(null)
-          setStatus('anonymous')
+          clearSession()
         } else {
           // Lỗi mạng hoặc 5xx không được coi là đã logout
           setStatus('unavailable')
@@ -67,7 +72,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => {
       isMounted = false
     }
-  }, [bootstrapTrigger, applyAuthResponse])
+  }, [bootstrapTrigger, applyAuthResponse, clearSession])
 
   const login = useCallback(
     async (email: string, password: string): Promise<void> => {
@@ -88,11 +93,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const logout = useCallback(async (): Promise<void> => {
     // Chỉ xác nhận logout thành công sau khi server trả 204
     await apiLogout()
-    accessTokenRef.current = null
-    expiresAtRef.current = null
-    setUser(null)
-    setStatus('anonymous')
-  }, [])
+    clearSession()
+  }, [clearSession])
 
   const retryBootstrap = useCallback(() => {
     setStatus('checking')
@@ -119,15 +121,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return data.accessToken
       } catch (err) {
         if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-          accessTokenRef.current = null
-          expiresAtRef.current = null
-          setUser(null)
-          setStatus('anonymous')
+          clearSession()
         }
         throw err
       }
     },
-    [applyAuthResponse]
+    [applyAuthResponse, clearSession]
   )
 
   const updateProfile = useCallback(
@@ -150,15 +149,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
 
           // Retry update profile đúng 1 lần với token mới
-          const updatedUser = await apiUpdateProfile(request, token)
-          setUser(updatedUser)
-          return
+          try {
+            const updatedUser = await apiUpdateProfile(request, token)
+            setUser(updatedUser)
+            return
+          } catch (retryErr) {
+            // Nếu retry cuối vẫn trả 401/403: terminal authorization -> clear session
+            if (
+              retryErr instanceof ApiError &&
+              (retryErr.status === 401 || retryErr.status === 403)
+            ) {
+              clearSession()
+            }
+            throw retryErr
+          }
         }
 
         throw err
       }
     },
-    [getAccessToken]
+    [getAccessToken, clearSession]
   )
 
   const value: AuthContextValue = {

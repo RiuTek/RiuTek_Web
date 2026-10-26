@@ -106,7 +106,11 @@ export const LoginPage: React.FC = () => {
             className="inline-flex items-center gap-2 group mb-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl px-1"
             aria-label="Trang chủ RiuTek"
           >
-            <BrandLogo className="h-12 w-auto group-hover:scale-105 transition-transform" />
+            <BrandLogo
+              markClassName="h-10 sm:h-12 w-auto group-hover:scale-105 transition-transform"
+              textClassName="text-2xl sm:text-3xl"
+              theme="light"
+            />
           </Link>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
             Đăng Nhập Tài Khoản

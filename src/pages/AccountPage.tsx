@@ -10,6 +10,7 @@ import {
   Loader2,
   LogOut,
   Save,
+  X,
 } from 'lucide-react'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
@@ -37,14 +38,41 @@ interface ProfileFormProps {
 }
 
 const ProfileForm: React.FC<ProfileFormProps> = ({ user, updateProfile }) => {
-  const [fullName, setFullName] = useState(user.fullName ?? '')
-  const [phoneNumber, setPhoneNumber] = useState(user.phoneNumber ?? '')
+  // Baseline theo dữ liệu ban đầu từ user context
+  const [baseline, setBaseline] = useState(() => ({
+    fullName: user.fullName ?? '',
+    phoneNumber: user.phoneNumber ?? '',
+  }))
+
+  const [fullName, setFullName] = useState(baseline.fullName)
+  const [phoneNumber, setPhoneNumber] = useState(baseline.phoneNumber)
 
   const [nameError, setNameError] = useState<string | null>(null)
   const [phoneError, setPhoneError] = useState<string | null>(null)
   const [apiError, setApiError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Form dirty khi giá trị hiện tại khác baseline
+  const isDirty =
+    fullName !== baseline.fullName || phoneNumber !== baseline.phoneNumber
+
+  // Đồng bộ khi user từ AuthContext thay đổi từ bên ngoài (ví dụ refresh session):
+  // Nếu form chưa dirty thì đồng bộ giá trị và cập nhật baseline
+  // Nếu người dùng đang chỉnh sửa (isDirty === true), giữ nguyên dữ liệu đang nhập
+  const [prevUser, setPrevUser] = useState(user)
+  if (user !== prevUser) {
+    setPrevUser(user)
+    const serverName = user.fullName ?? ''
+    const serverPhone = user.phoneNumber ?? ''
+    if (serverName !== baseline.fullName || serverPhone !== baseline.phoneNumber) {
+      if (!isDirty) {
+        setFullName(serverName)
+        setPhoneNumber(serverPhone)
+        setBaseline({ fullName: serverName, phoneNumber: serverPhone })
+      }
+    }
+  }
 
   const roleLabel = USER_ROLE_LABELS[user.role] ?? 'Không xác định'
 
@@ -83,9 +111,15 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ user, updateProfile }) => {
     setIsSubmitting(true)
 
     try {
+      const payloadPhone = cleanPhone.length > 0 ? cleanPhone : null
       await updateProfile({
         fullName: cleanName,
-        phoneNumber: cleanPhone.length > 0 ? cleanPhone : null,
+        phoneNumber: payloadPhone,
+      })
+      // Cập nhật baseline theo dữ liệu vừa lưu thành công -> form trở về trạng thái clean
+      setBaseline({
+        fullName: cleanName,
+        phoneNumber: cleanPhone,
       })
       setSuccessMessage('Cập nhật thông tin tài khoản thành công!')
     } catch (err) {
@@ -293,6 +327,7 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ user, updateProfile }) => {
 export const AccountPage: React.FC = () => {
   const { user, updateProfile, logout } = useAuth()
   const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
 
   if (!user) {
     return null
@@ -303,8 +338,11 @@ export const AccountPage: React.FC = () => {
   const handleLogout = async () => {
     if (isLoggingOut) return
     setIsLoggingOut(true)
+    setLogoutError(null)
     try {
       await logout()
+    } catch {
+      setLogoutError('Không thể đăng xuất. Vui lòng kiểm tra kết nối và thử lại.')
     } finally {
       setIsLoggingOut(false)
     }
@@ -332,6 +370,27 @@ export const AccountPage: React.FC = () => {
           <span>{isLoggingOut ? 'Đang đăng xuất...' : 'Đăng Xuất'}</span>
         </button>
       </div>
+
+      {/* Logout Error Alert */}
+      {logoutError && (
+        <div
+          role="alert"
+          className="p-4 bg-rose-50 border border-rose-200 text-rose-800 text-xs sm:text-sm rounded-2xl flex items-center justify-between gap-3 shadow-xs"
+        >
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+            <span>{logoutError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setLogoutError(null)}
+            className="p-1 hover:bg-rose-100 rounded-lg text-rose-700 transition-colors"
+            aria-label="Đóng thông báo lỗi đăng xuất"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Profile Overview Card */}
       <div className="bg-slate-900 text-white rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-lg">
@@ -362,7 +421,7 @@ export const AccountPage: React.FC = () => {
       </div>
 
       {/* Edit Profile Form */}
-      <ProfileForm key={user.id} user={user} updateProfile={updateProfile} />
+      <ProfileForm user={user} updateProfile={updateProfile} />
     </div>
   )
 }

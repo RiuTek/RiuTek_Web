@@ -60,7 +60,11 @@ export const Header: React.FC = () => {
           className="flex items-center gap-2 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl px-1 py-0.5"
           aria-label="Trang chủ RiuTek"
         >
-          <BrandLogo className="h-9 w-auto group-hover:scale-105 transition-transform" />
+          <BrandLogo
+            markClassName="h-8 sm:h-9 w-auto group-hover:scale-105 transition-transform"
+            textClassName="text-xl sm:text-2xl"
+            theme="light"
+          />
         </Link>
 
         {/* Desktop Navigation Links */}
