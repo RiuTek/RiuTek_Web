@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   Trash2,
   Package,
-  ShieldCheck,
   CheckCircle2,
 } from 'lucide-react'
 import { formatVnd } from '../features/products/productConstants'
@@ -297,16 +296,23 @@ export const CartPage: React.FC = () => {
               </div>
             )}
 
-            {/* Note about checkout phase */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5 text-xs text-slate-600">
-              <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                <ShieldCheck className="w-4 h-4 text-red-600 flex-shrink-0" />
-                <span>Quy trình đặt hàng</span>
-              </div>
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Tính năng thanh toán và quản lý địa chỉ giao hàng sẽ được hỗ trợ trong phiên bản kế tiếp.
-              </p>
-            </div>
+            {/* Checkout CTA */}
+            {cart.canCheckout ? (
+              <Link
+                to="/checkout"
+                className="w-full py-3.5 px-6 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-sm sm:text-base font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                <span>Tiến Hành Thanh Toán</span>
+              </Link>
+            ) : (
+              <button
+                type="button"
+                disabled
+                className="w-full py-3.5 px-6 bg-slate-200 text-slate-400 rounded-2xl text-sm sm:text-base font-bold cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <span>Tiến Hành Thanh Toán</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

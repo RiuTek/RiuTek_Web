@@ -7,6 +7,9 @@ import { LoginPage } from '../pages/LoginPage'
 import { RegisterPage } from '../pages/RegisterPage'
 import { AccountPage } from '../pages/AccountPage'
 import { CartPage } from '../pages/CartPage'
+import { CheckoutPage } from '../pages/CheckoutPage'
+import { CheckoutCompletePage } from '../pages/CheckoutCompletePage'
+import { StripeCheckoutCancelPage } from '../pages/StripeCheckoutCancelPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -36,6 +39,30 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <CartPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/checkout',
+        element: (
+          <RequireAuth>
+            <CheckoutPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/checkout/success',
+        element: (
+          <RequireAuth>
+            <CheckoutCompletePage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/checkout/cancel',
+        element: (
+          <RequireAuth>
+            <StripeCheckoutCancelPage />
           </RequireAuth>
         ),
       },
