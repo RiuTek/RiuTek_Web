@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import {
@@ -41,15 +47,27 @@ function isCartConflict(err: unknown): boolean {
   )
 }
 
-export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
+/**
+ * Inner provider chứa toàn bộ lifecycle, state và async operations của một phiên xác thực cụ thể.
+ * Được mount/unmount tự động qua session key của CartProvider.
+ */
+const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
   const { status: authStatus, getAccessToken } = useAuth()
+  const isMountedRef = useRef(true)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const [cart, setCart] = useState<CartDto | null>(null)
   const [status, setStatus] = useState<CartStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [isMutating, setIsMutating] = useState(false)
 
-  // Lưu trữ active load promise để tránh race conditions hoặc reload trùng lặp
+  // Lưu trữ active load promise cho phiên hiện tại (không dùng chung giữa các user)
   const activeLoadRef = useRef<Promise<CartDto> | null>(null)
 
   /**
@@ -81,60 +99,84 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
   )
 
   /**
-   * Tải giỏ hàng từ server
+   * Tải giỏ hàng từ server cho session hiện tại
    */
-  const loadCartInternal = useCallback(async (): Promise<CartDto> => {
-    if (activeLoadRef.current) {
-      return activeLoadRef.current
-    }
+  const loadCartInternal = useCallback(
+    async (signal?: AbortSignal): Promise<CartDto> => {
+      if (activeLoadRef.current) {
+        return activeLoadRef.current
+      }
 
-    setStatus((prev) => (prev === 'ready' ? 'ready' : 'loading'))
-    setError(null)
-
-    const fetchPromise = withAuthRetry((token) => getCart(token))
-      .then((data) => {
-        setCart(data)
-        setStatus('ready')
+      if (isMountedRef.current) {
+        setStatus((prev) => (prev === 'ready' ? 'ready' : 'loading'))
         setError(null)
-        return data
-      })
-      .catch((err) => {
-        const msg = mapCartError(err)
-        setError(msg)
-        setStatus('error')
-        throw err
-      })
-      .finally(() => {
-        activeLoadRef.current = null
-      })
+      }
 
-    activeLoadRef.current = fetchPromise
-    return fetchPromise
-  }, [withAuthRetry])
+      const fetchPromise = withAuthRetry((token) => getCart(token, signal))
+        .then((data) => {
+          if (isMountedRef.current) {
+            setCart(data)
+            setStatus('ready')
+            setError(null)
+          }
+          return data
+        })
+        .catch((err) => {
+          if (err instanceof Error && err.name === 'AbortError') {
+            throw err
+          }
+          if (isMountedRef.current) {
+            const msg = mapCartError(err)
+            setError(msg)
+            setStatus('error')
+          }
+          throw err
+        })
+        .finally(() => {
+          activeLoadRef.current = null
+        })
+
+      activeLoadRef.current = fetchPromise
+      return fetchPromise
+    },
+    [withAuthRetry]
+  )
 
   const loadCart = useCallback(async (): Promise<void> => {
     await loadCartInternal()
   }, [loadCartInternal])
 
-  // Reset giỏ hàng khi người dùng chuyển sang trạng thái anonymous (logout)
-  const [prevAuthStatus, setPrevAuthStatus] = useState(authStatus)
-  if (authStatus !== prevAuthStatus) {
-    setPrevAuthStatus(authStatus)
-    if (authStatus === 'anonymous') {
-      setCart(null)
-      setStatus('idle')
-      setError(null)
-    }
-  }
-
-  // Tải giỏ hàng khi người dùng đã xác thực
+  // Tải giỏ hàng khi session authenticated được kích hoạt
   useEffect(() => {
+    const abortController = new AbortController()
     if (authStatus === 'authenticated') {
-      loadCartInternal().catch(() => {
+      loadCartInternal(abortController.signal).catch(() => {
         // Lỗi đã được ghi nhận trong status và error state
       })
     }
+    return () => {
+      abortController.abort()
+    }
   }, [authStatus, loadCartInternal])
+
+  /**
+   * Helper xử lý xung đột (conflict recovery):
+   * 1. Tải lại state mới nhất đúng 1 lần (bắt lỗi để không tạo unhandled rejection)
+   * 2. Không replay lại mutation
+   * 3. Ném thông báo lỗi thân thiện cho caller
+   */
+  const recoverFromConflict = useCallback(
+    async (err: unknown): Promise<never> => {
+      try {
+        await loadCartInternal()
+      } catch {
+        // Lỗi reload đã được ghi nhận trong status/error của provider
+      }
+      const friendlyMessage = mapCartError(err)
+      throw new Error(friendlyMessage, { cause: err })
+    },
+    [loadCartInternal]
+  )
 
   /**
    * Thêm sản phẩm vào giỏ hàng
@@ -150,22 +192,27 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
         const updatedCart = await withAuthRetry((token) =>
           addCartItem({ productId, quantity }, token)
         )
-        setCart(updatedCart)
-        setError(null)
+        if (isMountedRef.current) {
+          setCart(updatedCart)
+          setError(null)
+        }
         return updatedCart
       } catch (err) {
         if (isCartConflict(err)) {
-          // Tải lại state mới nhất nhưng không tự động lặp lại mutation để tránh cộng 2 lần
-          void loadCartInternal()
+          return await recoverFromConflict(err)
         }
         const friendlyMessage = mapCartError(err)
-        setError(friendlyMessage)
+        if (isMountedRef.current) {
+          setError(friendlyMessage)
+        }
         throw new Error(friendlyMessage, { cause: err })
       } finally {
-        setIsMutating(false)
+        if (isMountedRef.current) {
+          setIsMutating(false)
+        }
       }
     },
-    [authStatus, withAuthRetry, loadCartInternal]
+    [authStatus, withAuthRetry, recoverFromConflict]
   )
 
   /**
@@ -178,21 +225,27 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
         const updatedCart = await withAuthRetry((token) =>
           setCartItemQuantity(productId, quantity, token)
         )
-        setCart(updatedCart)
-        setError(null)
+        if (isMountedRef.current) {
+          setCart(updatedCart)
+          setError(null)
+        }
         return updatedCart
       } catch (err) {
         if (isCartConflict(err)) {
-          void loadCartInternal()
+          return await recoverFromConflict(err)
         }
         const friendlyMessage = mapCartError(err)
-        setError(friendlyMessage)
+        if (isMountedRef.current) {
+          setError(friendlyMessage)
+        }
         throw new Error(friendlyMessage, { cause: err })
       } finally {
-        setIsMutating(false)
+        if (isMountedRef.current) {
+          setIsMutating(false)
+        }
       }
     },
-    [withAuthRetry, loadCartInternal]
+    [withAuthRetry, recoverFromConflict]
   )
 
   /**
@@ -203,20 +256,24 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
       setIsMutating(true)
       try {
         await withAuthRetry((token) => removeCartItem(productId, token))
-        // Endpoint trả 204 No Content -> refetch cart để lấy state mới nhất
+        // Endpoint trả 204 No Content -> refetch cart
         await loadCartInternal()
       } catch (err) {
         if (isCartConflict(err)) {
-          void loadCartInternal()
+          return await recoverFromConflict(err)
         }
         const friendlyMessage = mapCartError(err)
-        setError(friendlyMessage)
+        if (isMountedRef.current) {
+          setError(friendlyMessage)
+        }
         throw new Error(friendlyMessage, { cause: err })
       } finally {
-        setIsMutating(false)
+        if (isMountedRef.current) {
+          setIsMutating(false)
+        }
       }
     },
-    [withAuthRetry, loadCartInternal]
+    [withAuthRetry, loadCartInternal, recoverFromConflict]
   )
 
   /**
@@ -230,15 +287,19 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
       await loadCartInternal()
     } catch (err) {
       if (isCartConflict(err)) {
-        void loadCartInternal()
+        return await recoverFromConflict(err)
       }
       const friendlyMessage = mapCartError(err)
-      setError(friendlyMessage)
+      if (isMountedRef.current) {
+        setError(friendlyMessage)
+      }
       throw new Error(friendlyMessage, { cause: err })
     } finally {
-      setIsMutating(false)
+      if (isMountedRef.current) {
+        setIsMutating(false)
+      }
     }
-  }, [withAuthRetry, loadCartInternal])
+  }, [withAuthRetry, loadCartInternal, recoverFromConflict])
 
   const clearError = useCallback(() => {
     setError(null)
@@ -280,4 +341,20 @@ export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
   )
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>
+}
+
+/**
+ * Outer CartProvider: Quản lý session isolation giữa các người dùng và trạng thái đăng nhập.
+ * Unmount và reset toàn bộ state/ref khi người dùng đăng xuất hoặc chuyển đổi tài khoản.
+ */
+export const CartProvider: React.FC<CartProviderProps> = ({ children }) => {
+  const { status: authStatus, user } = useAuth()
+
+  // Key duy nhất gắn với auth status và user.id cụ thể
+  const sessionKey =
+    authStatus === 'authenticated' && user
+      ? `authenticated:${user.id}`
+      : authStatus
+
+  return <CartSessionProvider key={sessionKey}>{children}</CartSessionProvider>
 }

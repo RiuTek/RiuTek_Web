@@ -30,6 +30,14 @@ export const CartPage: React.FC = () => {
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
 
+  const handleRetryLoad = async () => {
+    try {
+      await loadCart()
+    } catch {
+      // Lỗi đã được ghi nhận vào state error/status của Cart Provider
+    }
+  }
+
   const handleUpdateQuantity = async (productId: string, quantity: number) => {
     setActionError(null)
     try {
@@ -93,8 +101,8 @@ export const CartPage: React.FC = () => {
         <div className="pt-2">
           <button
             type="button"
-            onClick={() => void loadCart()}
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 transition-colors shadow-sm"
+            onClick={handleRetryLoad}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-slate-800 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
           >
             <RotateCcw className="w-4 h-4" />
             <span>Thử lại</span>
@@ -116,14 +124,14 @@ export const CartPage: React.FC = () => {
           <h2 className="text-2xl font-extrabold text-slate-950 tracking-tight">
             Giỏ Hàng Của Bạn Đang Trống
           </h2>
-          <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
-            Khám phá hàng ngàn linh kiện máy tính, vi xử lý, card đồ họa và hệ thống PC Gaming chính hãng tại RiuTek.
+          <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto leading-relaxed">
+            Khám phá các linh kiện máy tính và lựa chọn sản phẩm phù hợp với cấu hình của bạn.
           </p>
         </div>
         <div className="pt-2">
           <Link
             to="/products"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-red-700 transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl text-xs sm:text-sm font-bold hover:bg-red-700 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
           >
             <Package className="w-4 h-4" />
             <span>Tiếp Tục Mua Sắm</span>
@@ -181,7 +189,7 @@ export const CartPage: React.FC = () => {
               type="button"
               onClick={() => setConfirmingClear(true)}
               disabled={isMutating}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 transition-colors border border-slate-200 hover:border-rose-200 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-semibold text-slate-600 hover:text-rose-600 hover:bg-rose-50 transition-colors border border-slate-200 hover:border-rose-200 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
             >
               <Trash2 className="w-4 h-4" />
               <span>Xóa Giỏ Hàng</span>
@@ -228,7 +236,7 @@ export const CartPage: React.FC = () => {
           <div className="pt-4">
             <Link
               to="/products"
-              className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-red-600 transition-colors"
+              className="inline-flex items-center gap-2 text-xs sm:text-sm font-bold text-slate-600 hover:text-red-600 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Tiếp tục chọn thêm linh kiện</span>
@@ -259,7 +267,7 @@ export const CartPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-100 flex items-baseline justify-between">
               <div>
                 <span className="text-sm font-extrabold text-slate-950">Tổng tiền</span>
-                <p className="text-[10px] text-slate-400">Đã bao gồm VAT nếu có</p>
+                <p className="text-[10px] text-slate-400">Tạm tính theo giá hiện tại</p>
               </div>
               <span className="text-xl sm:text-2xl font-black text-red-600">
                 {formatVnd(cart.subtotal)}
@@ -293,7 +301,7 @@ export const CartPage: React.FC = () => {
             <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5 text-xs text-slate-600">
               <div className="flex items-center gap-1.5 font-bold text-slate-800">
                 <ShieldCheck className="w-4 h-4 text-red-600 flex-shrink-0" />
-                <span>Bảo hành &amp; Đặt hàng</span>
+                <span>Quy trình đặt hàng</span>
               </div>
               <p className="text-[11px] text-slate-500 leading-relaxed">
                 Tính năng thanh toán và quản lý địa chỉ giao hàng sẽ được hỗ trợ trong phiên bản kế tiếp.
