@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -21,7 +21,10 @@ import {
   clearPendingStripeCheckout,
   getPendingStripeCheckout,
 } from '../features/checkout/stripeCheckoutSession'
-import type { OrderDetailDto } from '../features/checkout/checkoutTypes'
+import type {
+  OrderDetailDto,
+  PendingStripeCheckout,
+} from '../features/checkout/checkoutTypes'
 
 function formatVnd(amount: number): string {
   return new Intl.NumberFormat('vi-VN', {
@@ -29,6 +32,31 @@ function formatVnd(amount: number): string {
     currency: 'VND',
   }).format(amount)
 }
+
+function shouldClearPendingStripe(
+  order: OrderDetailDto,
+  pending: PendingStripeCheckout | null
+): boolean {
+  if (!pending || pending.orderId !== order.id) return false
+
+  const orderIsTerminalOrActive = [
+    'Confirmed',
+    'Processing',
+    'Shipping',
+    'Completed',
+    'Cancelled',
+    'Refunded',
+  ].includes(order.status)
+
+  const paymentIsTerminal = [
+    'Completed',
+    'Failed',
+    'Refunded',
+  ].includes(order.paymentStatus)
+
+  return orderIsTerminalOrActive || paymentIsTerminal
+}
+
 
 export const CheckoutCompletePage: React.FC = () => {
   const [searchParams] = useSearchParams()
@@ -45,6 +73,17 @@ export const CheckoutCompletePage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(() => Boolean(targetOrderId))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const cleanupPendingStripeForOrder = useCallback(
+    (loadedOrder: OrderDetailDto) => {
+      if (!user?.id) return
+      const pending = getPendingStripeCheckout(user.id)
+      if (shouldClearPendingStripe(loadedOrder, pending)) {
+        clearPendingStripeCheckout()
+      }
+    },
+    [user]
+  )
 
   const handleManualRefresh = async () => {
     if (!targetOrderId || isRefreshing) return
@@ -69,21 +108,7 @@ export const CheckoutCompletePage: React.FC = () => {
       }
 
       setOrder(result)
-
-      const shouldClearPending =
-        result.paymentStatus === 'Completed' ||
-        result.paymentStatus === 'Failed' ||
-        result.paymentStatus === 'Refunded' ||
-        result.status === 'Confirmed' ||
-        result.status === 'Processing' ||
-        result.status === 'Shipping' ||
-        result.status === 'Completed' ||
-        result.status === 'Cancelled' ||
-        result.status === 'Refunded'
-
-      if (shouldClearPending) {
-        clearPendingStripeCheckout()
-      }
+      cleanupPendingStripeForOrder(result)
     } catch {
       setLoadError(
         'Không thể tải thông tin chi tiết đơn hàng. Vui lòng thử tải lại.'
@@ -116,21 +141,7 @@ export const CheckoutCompletePage: React.FC = () => {
       .then((result) => {
         if (!cancelled) {
           setOrder(result)
-
-          const shouldClearPending =
-            result.paymentStatus === 'Completed' ||
-            result.paymentStatus === 'Failed' ||
-            result.paymentStatus === 'Refunded' ||
-            result.status === 'Confirmed' ||
-            result.status === 'Processing' ||
-            result.status === 'Shipping' ||
-            result.status === 'Completed' ||
-            result.status === 'Cancelled' ||
-            result.status === 'Refunded'
-
-          if (shouldClearPending) {
-            clearPendingStripeCheckout()
-          }
+          cleanupPendingStripeForOrder(result)
           setIsLoading(false)
         }
       })
@@ -147,7 +158,7 @@ export const CheckoutCompletePage: React.FC = () => {
       cancelled = true
       abortController.abort()
     }
-  }, [targetOrderId, getAccessToken])
+  }, [targetOrderId, getAccessToken, cleanupPendingStripeForOrder])
 
   // Không tìm thấy mã đơn hàng nào
   if (!targetOrderId) {
