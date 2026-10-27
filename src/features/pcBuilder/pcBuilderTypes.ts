@@ -1,5 +1,8 @@
-import type { ComponentType } from '../products/productTypes'
-import type { ProductSummary } from '../products/productTypes'
+import type {
+  ComponentSpecification,
+  ComponentType,
+  ProductSummary,
+} from '../products/productTypes'
 
 /**
  * Input cho một linh kiện khi gửi lên Backend để kiểm tra preview
@@ -17,35 +20,38 @@ export interface PCBuildPreviewRequest {
 }
 
 /**
- * Một linh kiện trong kết quả preview do Backend trả về
+ * Một linh kiện trong kết quả preview do Backend trả về (khớp chính xác PCBuildItemDto)
  */
 export interface PCBuildPreviewItem {
   productId: string
-  productName: string
+  name: string
+  slug: string
   sku: string
-  imageUrl?: string | null
+  imageUrl: string
   componentType: ComponentType
-  unitPrice: number
   quantity: number
-  linePrice: number
+  currentUnitPrice: number
+  lineTotal: number
+  stockQuantity: number
+  isActive: boolean
   canPurchase: boolean
-  issueCode?: string | null
-  stockQuantity?: number
+  issueCode: string | null
+  specifications: ComponentSpecification | null
 }
 
 /**
- * Chi tiết vấn đề tương thích phát hiện bởi Backend
+ * Chi tiết vấn đề tương thích phát hiện bởi Backend (khớp CompatibilityIssueDto)
  */
 export interface CompatibilityIssue {
   ruleId: string
-  severity: 'Error' | 'Warning' | 'Info' | string
-  componentA?: ComponentType | null
-  componentB?: ComponentType | null
+  severity: string
+  componentA: string
+  componentB: string
   message: string
 }
 
 /**
- * Kết quả kiểm tra tương thích và tính toán cấu hình từ Backend
+ * Kết quả kiểm tra tương thích và tính toán cấu hình từ Backend (khớp PCBuildPreviewDto)
  */
 export interface PCBuildPreviewResult {
   totalPrice: number
@@ -53,7 +59,7 @@ export interface PCBuildPreviewResult {
   recommendedPsuWattage: number
   isCompatible: boolean
   isCompleteSystem: boolean
-  missingComponents: ComponentType[]
+  missingComponents: string[]
   issues: CompatibilityIssue[]
   canPurchaseAll: boolean
   items: PCBuildPreviewItem[]

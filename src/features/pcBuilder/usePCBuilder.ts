@@ -15,14 +15,27 @@ import type {
   SelectedPCBuildItem,
 } from './pcBuilderTypes'
 
+interface PreviewSnapshot {
+  configKey: string
+  result: PCBuildPreviewResult
+}
+
+interface ErrorSnapshot {
+  configKey: string
+  error: string
+}
+
 export function usePCBuilder() {
   const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>([])
   const [activeSlot, setActiveSlot] = useState<ComponentType | null>(null)
-  const [previewResult, setPreviewResult] = useState<PCBuildPreviewResult | null>(null)
-  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot | null>(null)
+  const [errorSnapshot, setErrorSnapshot] = useState<ErrorSnapshot | null>(null)
   const [completedKey, setCompletedKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
+  // Request tracking guards
+  const activeSequenceRef = useRef<number>(0)
+  const latestConfigKeyRef = useRef<string>('')
   const abortControllerRef = useRef<AbortController | null>(null)
 
   // Tập hợp các ID sản phẩm đã chọn
@@ -30,19 +43,34 @@ export function usePCBuilder() {
     return new Set(selectedItems.map((item) => item.product.id))
   }, [selectedItems])
 
-  // Key đại diện cho cấu hình hiện tại để xác định trạng thái loading
+  // Key xác thực đại diện duy nhất cho cấu hình hiện tại
   const currentConfigKey = useMemo(() => {
     if (selectedItems.length === 0) return ''
-    const serialized = selectedItems
+    return selectedItems
       .map((item) => `${item.product.id}:${item.quantity}`)
       .sort()
       .join(';')
-    return `${serialized}|${retryTrigger}`
-  }, [selectedItems, retryTrigger])
+  }, [selectedItems])
 
-  // isLoading được tính đồng bộ từ chênh lệch giữa key hoàn tất và key hiện tại
+  // Preview & Error chỉ được trả cho UI khi khớp chính xác currentConfigKey
+  const effectivePreviewResult =
+    previewSnapshot &&
+    previewSnapshot.configKey === currentConfigKey &&
+    selectedItems.length > 0
+      ? previewSnapshot.result
+      : null
+
+  const effectivePreviewError =
+    errorSnapshot &&
+    errorSnapshot.configKey === currentConfigKey &&
+    selectedItems.length > 0
+      ? errorSnapshot.error
+      : null
+
   const isPreviewLoading =
-    selectedItems.length > 0 && completedKey !== currentConfigKey
+    selectedItems.length > 0 &&
+    (completedKey !== currentConfigKey ||
+      (!effectivePreviewResult && !effectivePreviewError))
 
   // Chọn hoặc thay thế sản phẩm
   const selectProduct = useCallback((product: ProductSummary) => {
@@ -54,6 +82,14 @@ export function usePCBuilder() {
       const isSingle = isSingleChoiceComponent(product.componentType)
 
       if (isSingle) {
+        // Kiểm tra xem có đúng sản phẩm này đang được chọn hay không
+        const existingSingle = prev.find(
+          (item) => item.product.componentType === product.componentType
+        )
+        if (existingSingle && existingSingle.product.id === product.id) {
+          return prev // Không làm gì nếu đã chọn đúng sản phẩm này
+        }
+
         // Thay thế sản phẩm cùng ComponentType nếu là single-choice
         const filtered = prev.filter(
           (item) => item.product.componentType !== product.componentType
@@ -65,6 +101,10 @@ export function usePCBuilder() {
       // Multi-choice: Nếu đã có product.id trong danh sách thì tăng quantity (tối đa 20)
       const existingIndex = prev.findIndex((item) => item.product.id === product.id)
       if (existingIndex >= 0) {
+        const currentQty = prev[existingIndex].quantity
+        if (currentQty >= MAX_MULTI_CHOICE_QUANTITY) {
+          return prev // Đã đạt tối đa 20
+        }
         return prev.map((item, idx) => {
           if (idx !== existingIndex) return item
           return {
@@ -110,14 +150,17 @@ export function usePCBuilder() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
+    activeSequenceRef.current++
     setSelectedItems([])
-    setPreviewResult(null)
-    setPreviewError(null)
+    setPreviewSnapshot(null)
+    setErrorSnapshot(null)
     setCompletedKey(null)
   }, [])
 
   // Retry preview thủ công
   const retryPreview = useCallback(() => {
+    setCompletedKey(null)
+    setErrorSnapshot(null)
     setRetryTrigger((prev) => prev + 1)
   }, [])
 
@@ -136,8 +179,19 @@ export function usePCBuilder() {
     const controller = new AbortController()
     abortControllerRef.current = controller
 
-    const targetKey = currentConfigKey
+    const targetConfigKey = currentConfigKey
+    latestConfigKeyRef.current = currentConfigKey
+    const currentSeq = ++activeSequenceRef.current
+
     const timer = setTimeout(() => {
+      if (
+        controller.signal.aborted ||
+        activeSequenceRef.current !== currentSeq ||
+        latestConfigKeyRef.current !== targetConfigKey
+      ) {
+        return
+      }
+
       const payload: PCBuildItemInput[] = selectedItems.map((item) => ({
         productId: item.product.id,
         quantity: item.quantity,
@@ -145,24 +199,37 @@ export function usePCBuilder() {
 
       previewPCBuild(payload, controller.signal)
         .then((result) => {
-          setPreviewResult(result)
-          setPreviewError(null)
-          setCompletedKey(targetKey)
-        })
-        .catch((err: unknown) => {
-          if (err instanceof Error && err.name === 'AbortError') {
+          if (
+            controller.signal.aborted ||
+            activeSequenceRef.current !== currentSeq ||
+            latestConfigKeyRef.current !== targetConfigKey
+          ) {
             return
           }
-          if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
-            setPreviewError(PC_BUILDER_ERROR_MESSAGES[err.code])
-          } else if (err instanceof Error) {
-            setPreviewError(err.message)
-          } else {
-            setPreviewError(
-              'Không thể kiểm tra tương thích cấu hình lúc này. Vui lòng thử lại.'
-            )
+          setPreviewSnapshot({ configKey: targetConfigKey, result })
+          setErrorSnapshot(null)
+          setCompletedKey(targetConfigKey)
+        })
+        .catch((err: unknown) => {
+          if (
+            controller.signal.aborted ||
+            (err instanceof Error && err.name === 'AbortError') ||
+            activeSequenceRef.current !== currentSeq ||
+            latestConfigKeyRef.current !== targetConfigKey
+          ) {
+            return
           }
-          setCompletedKey(targetKey)
+
+          let msg = 'Không thể kiểm tra tương thích cấu hình lúc này. Vui lòng thử lại.'
+          if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
+            msg = PC_BUILDER_ERROR_MESSAGES[err.code]
+          } else if (err instanceof Error) {
+            msg = err.message
+          }
+
+          setErrorSnapshot({ configKey: targetConfigKey, error: msg })
+          setPreviewSnapshot(null)
+          setCompletedKey(targetConfigKey)
         })
     }, 400)
 
@@ -170,10 +237,7 @@ export function usePCBuilder() {
       clearTimeout(timer)
       controller.abort()
     }
-  }, [currentConfigKey, selectedItems])
-
-  const effectivePreviewResult = selectedItems.length === 0 ? null : previewResult
-  const effectivePreviewError = selectedItems.length === 0 ? null : previewError
+  }, [currentConfigKey, selectedItems, retryTrigger])
 
   return {
     selectedItems,

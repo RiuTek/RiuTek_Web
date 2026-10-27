@@ -171,8 +171,11 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
               <div className="p-4 sm:p-5 space-y-3 bg-slate-50/50 rounded-b-3xl">
                 {slotItems.map(({ product, quantity }) => {
                   const preview = previewMap.get(product.id)
-                  const lineTotal = preview?.linePrice ?? product.price * quantity
-                  const canPurchase = preview ? preview.canPurchase : true
+                  const unitPrice = preview ? preview.currentUnitPrice : product.price
+                  const lineTotal = preview ? preview.lineTotal : product.price * quantity
+                  const canPurchase = preview
+                    ? preview.canPurchase
+                    : product.isActive && product.stockQuantity > 0
                   const issueCode = preview?.issueCode
 
                   return (
@@ -185,8 +188,8 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                         <div className="w-14 h-14 rounded-xl bg-white border border-slate-100 flex items-center justify-center flex-shrink-0 overflow-hidden">
                           <SlotThumbnail
                             key={product.imageUrl ?? product.id}
-                            url={product.imageUrl}
-                            alt={product.name}
+                            url={preview?.imageUrl || product.imageUrl}
+                            alt={preview?.name || product.name}
                           />
                         </div>
 
@@ -194,17 +197,17 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                           <div className="flex items-center gap-2 text-[10px] text-slate-400">
                             <span>{product.brand}</span>
                             <span>•</span>
-                            <span>SKU: {product.sku}</span>
+                            <span>SKU: {preview?.sku || product.sku}</span>
                           </div>
                           <h4
                             className="text-xs sm:text-sm font-bold text-slate-900 truncate"
-                            title={product.name}
+                            title={preview?.name || product.name}
                           >
-                            {product.name}
+                            {preview?.name || product.name}
                           </h4>
                           <div className="flex items-center gap-2 text-xs">
                             <span className="font-semibold text-slate-600">
-                              {formatVnd(product.price)}
+                              {formatVnd(unitPrice)}
                             </span>
                             {quantity > 1 && (
                               <span className="text-slate-400">

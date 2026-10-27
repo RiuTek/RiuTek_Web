@@ -9,14 +9,13 @@ import {
 } from 'lucide-react'
 import { usePCBuilder } from '../features/pcBuilder/usePCBuilder'
 import { PCBuilderSlotList } from '../features/pcBuilder/components/PCBuilderSlotList'
-import { PCBuilderProductPicker } from '../features/pcBuilder/components/PCBuilderProductPicker'
+import { PCBuilderProductPickerModal } from '../features/pcBuilder/components/PCBuilderProductPickerModal'
 import { PCBuilderSummary } from '../features/pcBuilder/components/PCBuilderSummary'
-import { ComponentType } from '../features/products/productTypes'
+import type { ComponentType, ProductSummary } from '../features/products/productTypes'
 
 export const PCBuilderPage: React.FC = () => {
   const {
     selectedItems,
-    selectedProductIds,
     activeSlot,
     setActiveSlot,
     previewResult,
@@ -29,7 +28,7 @@ export const PCBuilderPage: React.FC = () => {
     retryPreview,
   } = usePCBuilder()
 
-  const handleSelectProduct = (product: import('../features/products/productTypes').ProductSummary) => {
+  const handleSelectProduct = (product: ProductSummary) => {
     selectProduct(product)
   }
 
@@ -69,7 +68,7 @@ export const PCBuilderPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Kiểm tra tương thích chuẩn</span>
+                <span>Kiểm tra tương thích theo quy tắc</span>
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
                 <Zap className="w-4 h-4 text-amber-500" />
@@ -87,43 +86,29 @@ export const PCBuilderPage: React.FC = () => {
       {/* Main Content Layout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Left / Center Column: Product Picker Panel (if active) & Slot List */}
-          <div className="lg:col-span-7 xl:col-span-8 space-y-6">
-            {/* Active Product Picker Panel */}
-            {activeSlot !== null && (
-              <div className="scroll-mt-6">
-                <PCBuilderProductPicker
-                  key={activeSlot}
-                  activeSlot={activeSlot}
-                  onSelectProduct={handleSelectProduct}
-                  onClose={() => setActiveSlot(null)}
-                  selectedItemIds={selectedProductIds}
-                />
-              </div>
-            )}
-
-            {/* 9 Component Slots */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between pb-1">
+          {/* Left Column: Stable Slot List */}
+          <div className="lg:col-span-7 xl:col-span-8 space-y-4">
+            <div className="flex items-center justify-between pb-1">
+              <div>
                 <h2 className="text-base sm:text-lg font-black text-slate-950">
                   Danh Sách Linh Kiện Cấu Hình
                 </h2>
-                <span className="text-xs text-slate-400">
-                  Nhấn "Chọn linh kiện" ở từng nhóm bên dưới
-                </span>
+                <p className="text-xs text-slate-500">
+                  Nhấn "Chọn linh kiện" hoặc "Thay thế" ở từng nhóm để mở danh mục
+                </p>
               </div>
-
-              <PCBuilderSlotList
-                selectedItems={selectedItems}
-                previewItems={previewResult?.items}
-                activeSlot={activeSlot}
-                onSelectSlot={(slot: ComponentType) => {
-                  setActiveSlot(slot)
-                }}
-                onUpdateQuantity={updateItemQuantity}
-                onRemoveItem={removeItem}
-              />
             </div>
+
+            <PCBuilderSlotList
+              selectedItems={selectedItems}
+              previewItems={previewResult?.items}
+              activeSlot={activeSlot}
+              onSelectSlot={(slot: ComponentType) => {
+                setActiveSlot(slot)
+              }}
+              onUpdateQuantity={updateItemQuantity}
+              onRemoveItem={removeItem}
+            />
           </div>
 
           {/* Right Column: Compatibility Summary */}
@@ -140,6 +125,17 @@ export const PCBuilderPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Product Picker Modal */}
+      {activeSlot !== null && (
+        <PCBuilderProductPickerModal
+          key={activeSlot}
+          activeSlot={activeSlot}
+          onSelectProduct={handleSelectProduct}
+          onClose={() => setActiveSlot(null)}
+          selectedItems={selectedItems}
+        />
+      )}
     </div>
   )
 }

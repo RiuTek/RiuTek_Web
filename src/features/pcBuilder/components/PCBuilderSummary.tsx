@@ -13,7 +13,7 @@ import {
   Layers,
   ShoppingBag,
 } from 'lucide-react'
-import { COMPONENT_TYPE_LABELS, formatVnd } from '../../products/productConstants'
+import { formatVnd } from '../../products/productConstants'
 import type { PCBuildPreviewResult } from '../pcBuilderTypes'
 
 interface PCBuilderSummaryProps {
@@ -179,12 +179,12 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                   <span>Còn thiếu các linh kiện cơ bản:</span>
                 </p>
                 <div className="flex flex-wrap gap-1.5 pt-1">
-                  {previewResult.missingComponents.map((comp) => (
+                  {previewResult.missingComponents.map((comp, idx) => (
                     <span
-                      key={comp}
+                      key={`${comp}-${idx}`}
                       className="px-2 py-0.5 bg-white border border-amber-200 text-amber-900 rounded-lg text-[11px] font-semibold"
                     >
-                      {COMPONENT_TYPE_LABELS[comp] || `Nhóm ${comp}`}
+                      {comp}
                     </span>
                   ))}
                 </div>
@@ -230,9 +230,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                   >
                     <div className="flex items-start gap-2">
                       <XCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-                      <span className="font-semibold leading-relaxed">
-                        {issue.message}
-                      </span>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold leading-relaxed">
+                          {issue.message}
+                        </p>
+                        {(issue.componentA || issue.componentB) && (
+                          <p className="text-[10px] text-rose-700 opacity-80">
+                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -245,9 +252,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                   >
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <span className="font-semibold leading-relaxed">
-                        {issue.message}
-                      </span>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold leading-relaxed">
+                          {issue.message}
+                        </p>
+                        {(issue.componentA || issue.componentB) && (
+                          <p className="text-[10px] text-amber-700 opacity-80">
+                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -260,9 +274,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                   >
                     <div className="flex items-start gap-2">
                       <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                      <span className="font-semibold leading-relaxed">
-                        {issue.message}
-                      </span>
+                      <div className="space-y-0.5">
+                        <p className="font-semibold leading-relaxed">
+                          {issue.message}
+                        </p>
+                        {(issue.componentA || issue.componentB) && (
+                          <p className="text-[10px] text-blue-700 opacity-80">
+                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
                 ))}
