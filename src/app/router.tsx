@@ -13,7 +13,7 @@ import { StripeCheckoutCancelPage } from '../pages/StripeCheckoutCancelPage'
 import { MyOrdersPage } from '../pages/MyOrdersPage'
 import { OrderDetailPage } from '../pages/OrderDetailPage'
 import { ProductBuyNowPage } from '../pages/ProductBuyNowPage'
-import { ComingSoonPage } from '../pages/ComingSoonPage'
+import { PCBuilderPage } from '../pages/PCBuilderPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
 
@@ -35,7 +35,7 @@ export const router = createBrowserRouter([
       },
       {
         path: '/pc-builder',
-        element: <ComingSoonPage />,
+        element: <PCBuilderPage />,
       },
       {
         path: '/cart',
