@@ -254,3 +254,29 @@ export function clearPendingStripeCheckout(): void {
     // Ignore error
   }
 }
+
+/**
+ * Xóa pending Stripe checkout metadata chỉ khi session khớp đúng currentUserId và orderId.
+ * Trả về true nếu đã xóa thành công, false nếu không khớp hoặc không có dữ liệu.
+ */
+export function clearPendingStripeCheckoutForOrder(
+  currentUserId: string,
+  orderId: string
+): boolean {
+  try {
+    const raw = sessionStorage.getItem(PENDING_STRIPE_STORAGE_KEY)
+    if (!raw) return false
+
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') return false
+
+    if (parsed.userId !== currentUserId || parsed.orderId !== orderId) {
+      return false
+    }
+
+    clearPendingStripeCheckout()
+    return true
+  } catch {
+    return false
+  }
+}

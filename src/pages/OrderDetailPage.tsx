@@ -26,7 +26,10 @@ import {
   OrderStatusBadge,
   PaymentStatusBadge,
 } from '../features/orders/components/OrderStatusBadge'
-import { getPendingStripeCheckout } from '../features/checkout/stripeCheckoutSession'
+import {
+  getPendingStripeCheckout,
+  clearPendingStripeCheckoutForOrder,
+} from '../features/checkout/stripeCheckoutSession'
 import type { OrderDetailDto } from '../features/orders/orderTypes'
 
 function formatVnd(amount: number): string {
@@ -142,7 +145,7 @@ export const OrderDetailPage: React.FC = () => {
     }
   }, [orderId, currentQueryKey, getAccessToken])
 
-  // Handle Cancel COD
+  // Handle Cancel Order (COD or Stripe)
   const handleConfirmCancel = async () => {
     if (!order || isCancelling) return
 
@@ -171,13 +174,23 @@ export const OrderDetailPage: React.FC = () => {
       setOrder(updatedOrder)
       setShowCancelConfirm(false)
       setCancelSuccessMsg('Đã hủy đơn hàng thành công.')
+
+      if (user?.id) {
+        clearPendingStripeCheckoutForOrder(user.id, updatedOrder.id)
+      }
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 409) {
         setCancelConflict(true)
         setCancelError(
-          'Trạng thái đơn hàng đã thay đổi trên hệ thống. Vui lòng tải lại trang để xem thông tin mới nhất.'
+          'Trạng thái đơn hàng hoặc phiên thanh toán đã thay đổi trên hệ thống. Vui lòng tải lại trang để xem thông tin mới nhất.'
+        )
+      } else if (err instanceof ApiError && err.status === 503) {
+        setCancelConflict(false)
+        setCancelError(
+          'Cổng thanh toán Stripe tạm thời không khả dụng. Đơn hàng chưa bị hủy, bạn có thể thử lại sau ít phút.'
         )
       } else {
+        setCancelConflict(false)
         setCancelError(
           'Không thể hủy đơn hàng lúc này. Vui lòng thử lại sau.'
         )
@@ -492,17 +505,21 @@ export const OrderDetailPage: React.FC = () => {
           </div>
         )}
 
-        {/* Cancellation Section for Confirmed COD */}
+        {/* Cancellation Section for Customer (Confirmed COD or Pending Stripe) */}
         {canCustomerCancelOrder(order) && (
           <div className="pt-4 border-t border-slate-100">
             {!showCancelConfirm ? (
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-2xl bg-slate-50 border border-slate-100">
                 <div>
                   <p className="text-xs sm:text-sm font-bold text-slate-900">
-                    Hủy Đơn Hàng COD
+                    {order.paymentMethod === 'Stripe'
+                      ? 'Hủy Đơn Hàng & Phiên Stripe'
+                      : 'Hủy Đơn Hàng COD'}
                   </p>
                   <p className="text-[11px] sm:text-xs text-slate-500">
-                    Đơn hàng COD đang ở trạng thái xác nhận và chưa được xử lý giao có thể hủy.
+                    {order.paymentMethod === 'Stripe'
+                      ? 'Phiên thanh toán Stripe sẽ bị đóng và số lượng sản phẩm được hoàn lại kho.'
+                      : 'Đơn hàng COD đang ở trạng thái xác nhận và chưa được xử lý giao có thể hủy.'}
                   </p>
                 </div>
                 <button
@@ -522,7 +539,9 @@ export const OrderDetailPage: React.FC = () => {
                       Xác nhận hủy đơn hàng #{order.orderNumber}?
                     </p>
                     <p className="text-xs text-rose-700">
-                      Hành động này không thể hoàn tác. Số lượng linh kiện sẽ được tự động khôi phục về kho RiuTek.
+                      {order.paymentMethod === 'Stripe'
+                        ? 'Hành động này không thể hoàn tác. Phiên thanh toán Stripe sẽ được đóng, đơn bị hủy và số lượng sản phẩm được tự động hoàn về kho RiuTek.'
+                        : 'Hành động này không thể hoàn tác. Số lượng linh kiện sẽ được tự động khôi phục về kho RiuTek.'}
                     </p>
                   </div>
                 </div>

@@ -77,7 +77,33 @@ export const ORDER_STATUS_COLORS: Record<
 }
 
 export function canCustomerCancelOrder(
-  order: Pick<OrderDetailDto, 'status' | 'paymentMethod'>
+  order: Pick<OrderDetailDto, 'status' | 'paymentMethod' | 'paymentStatus'>
 ): boolean {
-  return order.status === 'Confirmed' && order.paymentMethod === 'COD'
+  if (order.paymentMethod === 'COD' && order.status === 'Confirmed') {
+    return true
+  }
+  if (
+    order.paymentMethod === 'Stripe' &&
+    order.status === 'PendingPayment' &&
+    order.paymentStatus === 'Pending'
+  ) {
+    return true
+  }
+  return false
+}
+
+export function getCustomerCancelMode(
+  order: Pick<OrderDetailDto, 'status' | 'paymentMethod' | 'paymentStatus'>
+): 'COD' | 'Stripe' | null {
+  if (order.paymentMethod === 'COD' && order.status === 'Confirmed') {
+    return 'COD'
+  }
+  if (
+    order.paymentMethod === 'Stripe' &&
+    order.status === 'PendingPayment' &&
+    order.paymentStatus === 'Pending'
+  ) {
+    return 'Stripe'
+  }
+  return null
 }

@@ -49,8 +49,9 @@ export function getMyOrderById(
 }
 
 /**
- * Hủy đơn hàng COD ở trạng thái Confirmed của người dùng hiện tại.
- * Tuyệt đối không gửi body rỗng {}. Backend yêu cầu body là undefined.
+ * Hủy đơn hàng của người dùng hiện tại (hỗ trợ đơn COD ở trạng thái Confirmed
+ * hoặc đơn Stripe ở trạng thái PendingPayment / payment Pending).
+ * Tuyệt đối không gửi body rỗng {}. Backend yêu cầu body là undefined để tránh lỗi HTTP 415.
  */
 export function cancelMyOrder(
   orderId: string,
