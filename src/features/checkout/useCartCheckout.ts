@@ -244,6 +244,7 @@ export function useCartCheckout() {
           // Lưu metadata trước khi chuyển hướng sang Stripe
           if (user?.id) {
             savePendingStripeCheckout({
+              source: 'cart',
               userId: user.id,
               orderId: order.id,
               orderNumber: order.orderNumber,

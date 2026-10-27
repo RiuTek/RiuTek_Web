@@ -10,6 +10,7 @@ import {
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { checkoutCart } from '../features/checkout/checkoutApi'
+import { buyNowProduct } from '../features/buyNow/buyNowApi'
 import {
   CHECKOUT_ERROR_MESSAGES,
 } from '../features/checkout/checkoutConstants'
@@ -17,7 +18,6 @@ import {
   getPendingStripeCheckout,
   validateStripeRedirectUrl,
 } from '../features/checkout/stripeCheckoutSession'
-import type { CheckoutCartRequest } from '../features/checkout/checkoutTypes'
 
 export const StripeCheckoutCancelPage: React.FC = () => {
   const { user, getAccessToken } = useAuth()
@@ -32,25 +32,45 @@ export const StripeCheckoutCancelPage: React.FC = () => {
     setIsRetrying(true)
     setRetryError(null)
 
-    const request: CheckoutCartRequest = {
-      addressId: pending.addressId,
-      expectedCartVersion: pending.expectedCartVersion,
-      paymentMethod: 'Stripe',
-      notes: null,
-    }
-
     try {
       let token = await getAccessToken(false)
       if (!token) throw new Error('Chưa đăng nhập.')
 
+      const executeResume = async (authToken: string) => {
+        if (pending.source === 'product') {
+          return buyNowProduct(
+            pending.productId,
+            {
+              addressId: pending.addressId,
+              quantity: pending.quantity,
+              paymentMethod: 'Stripe',
+              notes: null,
+            },
+            pending.idempotencyKey,
+            authToken
+          )
+        }
+
+        return checkoutCart(
+          {
+            addressId: pending.addressId,
+            expectedCartVersion: pending.expectedCartVersion,
+            paymentMethod: 'Stripe',
+            notes: null,
+          },
+          pending.idempotencyKey,
+          authToken
+        )
+      }
+
       let order
       try {
-        order = await checkoutCart(request, pending.idempotencyKey, token)
+        order = await executeResume(token)
       } catch (err: unknown) {
         if (err instanceof ApiError && err.status === 401) {
           token = await getAccessToken(true)
           if (!token) throw err
-          order = await checkoutCart(request, pending.idempotencyKey, token)
+          order = await executeResume(token)
         } else {
           throw err
         }

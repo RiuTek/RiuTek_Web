@@ -9,6 +9,7 @@ import {
   AlertCircle,
   AlertTriangle,
   RotateCcw,
+  Zap,
 } from 'lucide-react'
 import { useAuth } from '../../auth/AuthContext'
 import { useCart } from '../CartContext'
@@ -94,6 +95,25 @@ export const ProductAddToCart: React.FC<ProductAddToCartProps> = ({ product }) =
     }
   }
 
+  const handleBuyNow = () => {
+    if (authStatus === 'checking') return
+
+    if (authStatus === 'unavailable') {
+      return
+    }
+
+    const buyNowUrl = `/buy-now/product/${encodeURIComponent(product.slug)}?quantity=${quantity}`
+
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: buyNowUrl } })
+      return
+    }
+
+    if (isUnavailable) return
+
+    navigate(buyNowUrl)
+  }
+
   return (
     <div className="space-y-4 pt-2">
       {/* Session Unavailable Alert */}
@@ -104,7 +124,7 @@ export const ProductAddToCart: React.FC<ProductAddToCartProps> = ({ product }) =
         >
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-            <span>Không thể xác thực phiên để kiểm tra giỏ hàng.</span>
+            <span>Không thể xác thực phiên để kiểm tra giỏ hàng và mua ngay.</span>
           </div>
           <button
             type="button"
@@ -161,9 +181,9 @@ export const ProductAddToCart: React.FC<ProductAddToCartProps> = ({ product }) =
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="flex items-center gap-4">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             {/* Quantity Selector */}
-            <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 p-1">
+            <div className="flex items-center justify-between sm:justify-start border border-slate-200 rounded-xl bg-slate-50 p-1 self-start sm:self-auto">
               <button
                 type="button"
                 onClick={handleDecrease}
@@ -190,30 +210,44 @@ export const ProductAddToCart: React.FC<ProductAddToCartProps> = ({ product }) =
               </button>
             </div>
 
-            {/* Main Add to Cart CTA */}
-            <button
-              type="button"
-              onClick={handleAddToCart}
-              disabled={isAdding || isMutating || authStatus === 'checking'}
-              className="flex-1 py-3 px-6 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700 transition-colors shadow-sm disabled:opacity-60 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-            >
-              {isAdding ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Đang thêm vào giỏ...</span>
-                </>
-              ) : (
-                <>
-                  <ShoppingCart className="w-4 h-4" />
-                  <span>Thêm Vào Giỏ Hàng</span>
-                </>
-              )}
-            </button>
+            {/* Action Buttons: Add to Cart & Buy Now */}
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {/* Add to Cart CTA */}
+              <button
+                type="button"
+                onClick={handleAddToCart}
+                disabled={isAdding || isMutating || authStatus === 'checking'}
+                className="py-3 px-4 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 rounded-xl text-xs sm:text-sm font-bold transition-colors shadow-2xs disabled:opacity-60 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                {isAdding ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang thêm...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingCart className="w-4 h-4" />
+                    <span>Thêm Vào Giỏ</span>
+                  </>
+                )}
+              </button>
+
+              {/* Buy Now CTA */}
+              <button
+                type="button"
+                onClick={handleBuyNow}
+                disabled={isAdding || isMutating || authStatus === 'checking'}
+                className="py-3 px-4 bg-red-600 text-white hover:bg-red-700 rounded-xl text-xs sm:text-sm font-bold transition-colors shadow-sm disabled:opacity-60 flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Mua Ngay</span>
+              </button>
+            </div>
           </div>
 
           {!isAuthenticated && authStatus !== 'checking' && (
             <p className="text-[11px] text-slate-500 text-center">
-              Bạn cần đăng nhập tài khoản để thêm và lưu sản phẩm trong giỏ hàng.
+              Đăng nhập tài khoản để đặt hàng hoặc thêm linh kiện vào giỏ hàng.
             </p>
           )}
         </div>

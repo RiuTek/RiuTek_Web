@@ -75,13 +75,23 @@ export interface CheckoutOrderDto {
   paymentAction: PaymentActionDto | null
 }
 
-export interface PendingStripeCheckout {
-  version: 1
+export interface PendingStripeCommon {
+  version: 2
   userId: string
   orderId: string
   orderNumber: string
   idempotencyKey: string
   addressId: string
-  expectedCartVersion: number
   createdAt: string
 }
+
+export type PendingStripeCheckout =
+  | (PendingStripeCommon & {
+      source: 'cart'
+      expectedCartVersion: number
+    })
+  | (PendingStripeCommon & {
+      source: 'product'
+      productId: string
+      quantity: number
+    })

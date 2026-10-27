@@ -12,6 +12,7 @@ import { CheckoutCompletePage } from '../pages/CheckoutCompletePage'
 import { StripeCheckoutCancelPage } from '../pages/StripeCheckoutCancelPage'
 import { MyOrdersPage } from '../pages/MyOrdersPage'
 import { OrderDetailPage } from '../pages/OrderDetailPage'
+import { ProductBuyNowPage } from '../pages/ProductBuyNowPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -65,6 +66,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <StripeCheckoutCancelPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/buy-now/product/:slug',
+        element: (
+          <RequireAuth>
+            <ProductBuyNowPage />
           </RequireAuth>
         ),
       },

@@ -5,6 +5,27 @@ import {
 } from './checkoutConstants'
 import type { PendingStripeCheckout } from './checkoutTypes'
 
+export type SavePendingStripeData =
+  | {
+      source: 'cart'
+      userId: string
+      orderId: string
+      orderNumber: string
+      idempotencyKey: string
+      addressId: string
+      expectedCartVersion: number
+    }
+  | {
+      source: 'product'
+      userId: string
+      orderId: string
+      orderNumber: string
+      idempotencyKey: string
+      addressId: string
+      productId: string
+      quantity: number
+    }
+
 /**
  * Kiểm tra tính hợp lệ của Stripe redirect URL.
  * Bắt buộc HTTPS và domain checkout.stripe.com.
@@ -22,23 +43,36 @@ export function validateStripeRedirectUrl(urlStr: string): boolean {
 }
 
 /**
- * Lưu pending Stripe checkout metadata vào sessionStorage.
+ * Lưu pending Stripe checkout metadata vào sessionStorage theo schema version 2.
  * TUYỆT ĐỐI không lưu token, PII, giỏ hàng hay ghi chú.
  */
-export function savePendingStripeCheckout(
-  data: Omit<PendingStripeCheckout, 'version' | 'createdAt'>
-): void {
+export function savePendingStripeCheckout(data: SavePendingStripeData): void {
   try {
-    const payload: PendingStripeCheckout = {
-      version: 1,
-      userId: data.userId,
-      orderId: data.orderId,
-      orderNumber: data.orderNumber,
-      idempotencyKey: data.idempotencyKey,
-      addressId: data.addressId,
-      expectedCartVersion: data.expectedCartVersion,
-      createdAt: new Date().toISOString(),
-    }
+    const payload: PendingStripeCheckout =
+      data.source === 'cart'
+        ? {
+            version: 2,
+            source: 'cart',
+            userId: data.userId,
+            orderId: data.orderId,
+            orderNumber: data.orderNumber,
+            idempotencyKey: data.idempotencyKey,
+            addressId: data.addressId,
+            expectedCartVersion: data.expectedCartVersion,
+            createdAt: new Date().toISOString(),
+          }
+        : {
+            version: 2,
+            source: 'product',
+            userId: data.userId,
+            orderId: data.orderId,
+            orderNumber: data.orderNumber,
+            idempotencyKey: data.idempotencyKey,
+            addressId: data.addressId,
+            productId: data.productId,
+            quantity: data.quantity,
+            createdAt: new Date().toISOString(),
+          }
     sessionStorage.setItem(PENDING_STRIPE_STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // sessionStorage có thể bị chặn ở incognito mode hoặc quota exceeded
@@ -47,10 +81,13 @@ export function savePendingStripeCheckout(
 
 /**
  * Lấy pending Stripe checkout metadata từ sessionStorage.
+ * Hỗ trợ:
+ * 1. Schema version 2 (discriminated union: cart | product)
+ * 2. Schema version 1 (backward compatibility: chuẩn hóa in-memory thành source 'cart')
  * Kiểm tra:
- * 1. Thuộc về đúng currentUserId
- * 2. Version === 1
- * 3. Chưa quá 24h (TTL)
+ * - Thuộc về đúng currentUserId
+ * - Idempotency-Key từ 16 đến 128 ký tự
+ * - Chưa quá 24h (TTL)
  */
 export function getPendingStripeCheckout(
   currentUserId: string
@@ -65,11 +102,7 @@ export function getPendingStripeCheckout(
       return null
     }
 
-    if (parsed.version !== 1) {
-      clearPendingStripeCheckout()
-      return null
-    }
-
+    // Common validations
     if (
       typeof parsed.userId !== 'string' ||
       !parsed.userId.trim() ||
@@ -103,15 +136,6 @@ export function getPendingStripeCheckout(
       return null
     }
 
-    if (
-      typeof parsed.expectedCartVersion !== 'number' ||
-      !Number.isInteger(parsed.expectedCartVersion) ||
-      parsed.expectedCartVersion < 1
-    ) {
-      clearPendingStripeCheckout()
-      return null
-    }
-
     if (typeof parsed.createdAt !== 'string') {
       clearPendingStripeCheckout()
       return null
@@ -129,16 +153,91 @@ export function getPendingStripeCheckout(
       return null
     }
 
-    return {
-      version: 1,
-      userId: parsed.userId,
-      orderId: parsed.orderId,
-      orderNumber: parsed.orderNumber,
-      idempotencyKey: parsed.idempotencyKey.trim(),
-      addressId: parsed.addressId,
-      expectedCartVersion: parsed.expectedCartVersion,
-      createdAt: parsed.createdAt,
+    // Version 1 (legacy cart backward compatibility)
+    if (parsed.version === 1) {
+      if (
+        typeof parsed.expectedCartVersion !== 'number' ||
+        !Number.isInteger(parsed.expectedCartVersion) ||
+        parsed.expectedCartVersion < 1
+      ) {
+        clearPendingStripeCheckout()
+        return null
+      }
+
+      return {
+        version: 2,
+        source: 'cart',
+        userId: parsed.userId,
+        orderId: parsed.orderId,
+        orderNumber: parsed.orderNumber,
+        idempotencyKey: parsed.idempotencyKey.trim(),
+        addressId: parsed.addressId,
+        expectedCartVersion: parsed.expectedCartVersion,
+        createdAt: parsed.createdAt,
+      }
     }
+
+    // Version 2 (discriminated union)
+    if (parsed.version === 2) {
+      if (parsed.source === 'cart') {
+        if (
+          typeof parsed.expectedCartVersion !== 'number' ||
+          !Number.isInteger(parsed.expectedCartVersion) ||
+          parsed.expectedCartVersion < 1
+        ) {
+          clearPendingStripeCheckout()
+          return null
+        }
+
+        return {
+          version: 2,
+          source: 'cart',
+          userId: parsed.userId,
+          orderId: parsed.orderId,
+          orderNumber: parsed.orderNumber,
+          idempotencyKey: parsed.idempotencyKey.trim(),
+          addressId: parsed.addressId,
+          expectedCartVersion: parsed.expectedCartVersion,
+          createdAt: parsed.createdAt,
+        }
+      }
+
+      if (parsed.source === 'product') {
+        if (typeof parsed.productId !== 'string' || !parsed.productId.trim()) {
+          clearPendingStripeCheckout()
+          return null
+        }
+
+        if (
+          typeof parsed.quantity !== 'number' ||
+          !Number.isInteger(parsed.quantity) ||
+          parsed.quantity < 1 ||
+          parsed.quantity > 99
+        ) {
+          clearPendingStripeCheckout()
+          return null
+        }
+
+        return {
+          version: 2,
+          source: 'product',
+          userId: parsed.userId,
+          orderId: parsed.orderId,
+          orderNumber: parsed.orderNumber,
+          idempotencyKey: parsed.idempotencyKey.trim(),
+          addressId: parsed.addressId,
+          productId: parsed.productId.trim(),
+          quantity: parsed.quantity,
+          createdAt: parsed.createdAt,
+        }
+      }
+
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    clearPendingStripeCheckout()
+    return null
   } catch {
     clearPendingStripeCheckout()
     return null
