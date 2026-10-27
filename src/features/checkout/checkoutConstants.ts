@@ -1,4 +1,7 @@
-import type { OrderStatus, PaymentStatus } from './checkoutTypes'
+export {
+  ORDER_STATUS_LABELS,
+  PAYMENT_STATUS_LABELS,
+} from '../orders/orderConstants'
 
 export const CHECKOUT_ERROR_MESSAGES: Record<string, string> = {
   'Checkout.Unauthorized': 'Vui lòng đăng nhập lại để thanh toán.',
@@ -24,23 +27,6 @@ export const QUOTE_ISSUE_MESSAGES: Record<string, string> = {
   OUT_OF_STOCK: 'Sản phẩm đang hết hàng.',
   INSUFFICIENT_STOCK: 'Số lượng yêu cầu vượt quá tồn kho.',
   PRODUCT_NOT_FOUND: 'Sản phẩm không còn tồn tại.',
-}
-
-export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
-  PendingPayment: 'Chờ thanh toán',
-  Confirmed: 'Đã xác nhận',
-  Processing: 'Đang xử lý',
-  Shipping: 'Đang giao hàng',
-  Completed: 'Hoàn tất',
-  Cancelled: 'Đã hủy',
-  Refunded: 'Đã hoàn tiền',
-}
-
-export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
-  Pending: 'Chờ xử lý',
-  Completed: 'Đã thanh toán',
-  Failed: 'Thất bại',
-  Refunded: 'Đã hoàn tiền',
 }
 
 export const PENDING_STRIPE_STORAGE_KEY = 'riutek:pending-stripe-checkout:v1'

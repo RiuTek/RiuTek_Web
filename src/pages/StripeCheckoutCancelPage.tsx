@@ -156,10 +156,10 @@ export const StripeCheckoutCancelPage: React.FC = () => {
             <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
-            to="/account"
+            to="/orders"
             className="w-full sm:w-auto px-5 py-2.5 text-slate-600 hover:text-slate-900 text-xs sm:text-sm font-semibold transition-colors text-center"
           >
-            Về Trang Tài Khoản
+            Xem Đơn Hàng Của Tôi
           </Link>
         </div>
       </div>

@@ -10,6 +10,8 @@ import { CartPage } from '../pages/CartPage'
 import { CheckoutPage } from '../pages/CheckoutPage'
 import { CheckoutCompletePage } from '../pages/CheckoutCompletePage'
 import { StripeCheckoutCancelPage } from '../pages/StripeCheckoutCancelPage'
+import { MyOrdersPage } from '../pages/MyOrdersPage'
+import { OrderDetailPage } from '../pages/OrderDetailPage'
 import { ComingSoonPage } from '../pages/ComingSoonPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -79,6 +81,22 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <AccountPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/orders',
+        element: (
+          <RequireAuth>
+            <MyOrdersPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/orders/:orderId',
+        element: (
+          <RequireAuth>
+            <OrderDetailPage />
           </RequireAuth>
         ),
       },

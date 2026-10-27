@@ -4,8 +4,9 @@ import type {
   CheckoutOrderDto,
   CheckoutQuoteDto,
   GetCheckoutQuoteRequest,
-  OrderDetailDto,
 } from './checkoutTypes'
+
+export { getMyOrderById } from '../orders/orderApi'
 
 /**
  * Lấy báo giá checkout cho giỏ hàng hiện tại với địa chỉ được chọn.
@@ -40,21 +41,4 @@ export function checkoutCart(
       'Idempotency-Key': idempotencyKey,
     },
   })
-}
-
-/**
- * Lấy chi tiết đơn hàng của người dùng hiện tại theo orderId.
- */
-export function getMyOrderById(
-  orderId: string,
-  token: string,
-  signal?: AbortSignal
-): Promise<OrderDetailDto> {
-  return apiClient.get<OrderDetailDto>(
-    `/orders/${encodeURIComponent(orderId)}`,
-    {
-      token,
-      signal,
-    }
-  )
 }

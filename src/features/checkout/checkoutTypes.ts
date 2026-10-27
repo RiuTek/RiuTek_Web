@@ -1,15 +1,20 @@
-export type PaymentMethod = 'COD' | 'Stripe'
+import type {
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  OrderItemDto,
+  OrderDetailDto,
+  PaymentActionDto,
+} from '../orders/orderTypes'
 
-export type OrderStatus =
-  | 'PendingPayment'
-  | 'Confirmed'
-  | 'Processing'
-  | 'Shipping'
-  | 'Completed'
-  | 'Cancelled'
-  | 'Refunded'
-
-export type PaymentStatus = 'Pending' | 'Completed' | 'Failed' | 'Refunded'
+export type {
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  OrderItemDto,
+  OrderDetailDto,
+  PaymentActionDto,
+}
 
 export interface CheckoutQuoteItemDto {
   productId: string
@@ -50,21 +55,6 @@ export interface CheckoutCartRequest {
   notes: string | null
 }
 
-export interface OrderItemDto {
-  productId: string
-  productName: string
-  productSku: string
-  unitPrice: number
-  quantity: number
-  totalPrice: number
-}
-
-export interface PaymentActionDto {
-  type: string
-  url: string
-  expiresAt: string
-}
-
 export interface CheckoutOrderDto {
   id: string
   orderNumber: string
@@ -83,26 +73,6 @@ export interface CheckoutOrderDto {
   createdAt: string
   items: OrderItemDto[]
   paymentAction: PaymentActionDto | null
-}
-
-export interface OrderDetailDto {
-  id: string
-  orderNumber: string
-  status: OrderStatus
-  paymentMethod: PaymentMethod
-  paymentStatus: PaymentStatus
-  currency: string
-  customerName: string
-  customerEmail: string
-  customerPhone: string
-  shippingAddress: string
-  totalAmount: number
-  discountAmount: number
-  finalAmount: number
-  notes: string | null
-  createdAt: string
-  items: OrderItemDto[]
-  paymentAction?: PaymentActionDto | null
 }
 
 export interface PendingStripeCheckout {

@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
-import { getMyOrderById } from '../features/checkout/checkoutApi'
+import { getMyOrderById } from '../features/orders/orderApi'
 import {
   ORDER_STATUS_LABELS,
   PAYMENT_STATUS_LABELS,
@@ -425,10 +425,10 @@ export const CheckoutCompletePage: React.FC = () => {
           Tiếp Tục Mua Sắm
         </Link>
         <Link
-          to="/account"
+          to="/orders"
           className="w-full sm:w-auto px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-xs sm:text-sm font-semibold transition-colors text-center"
         >
-          Quản Lý Tài Khoản
+          Đơn Hàng Của Tôi
         </Link>
       </div>
     </div>

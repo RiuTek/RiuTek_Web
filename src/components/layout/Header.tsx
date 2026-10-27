@@ -11,6 +11,7 @@ import {
   LogOut,
   RotateCcw,
   AlertTriangle,
+  Package,
 } from 'lucide-react'
 import { useAuth } from '../../features/auth/AuthContext'
 import { USER_ROLE_LABELS } from '../../features/auth/authTypes'
@@ -31,6 +32,7 @@ export const Header: React.FC = () => {
 
   const isActive = (path: string) => location.pathname === path
   const isProductsActive = location.pathname.startsWith('/products')
+  const isOrdersActive = location.pathname.startsWith('/orders')
 
   const handleLogout = async () => {
     if (isLoggingOut) return
@@ -155,6 +157,18 @@ export const Header: React.FC = () => {
             </div>
           ) : status === 'authenticated' && user ? (
             <div className="flex items-center gap-1.5 sm:gap-2">
+              <Link
+                to="/orders"
+                className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                  isOrdersActive
+                    ? 'bg-red-50 border border-red-200 text-red-600'
+                    : 'hover:bg-slate-50 text-slate-700 hover:text-red-600'
+                }`}
+                title="Đơn hàng của tôi"
+              >
+                <Package className="w-4 h-4" />
+                <span>Đơn Hàng</span>
+              </Link>
               <Link
                 to="/account"
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
@@ -354,6 +368,27 @@ export const Header: React.FC = () => {
                 </div>
               ) : status === 'authenticated' && user ? (
                 <div className="space-y-2">
+                  <Link
+                    to="/orders"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`block px-4 py-2.5 rounded-xl transition-colors ${
+                      isOrdersActive
+                        ? 'bg-red-50 border border-red-200 text-red-600'
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-900'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Package className="w-4 h-4 text-red-600" />
+                        <span className="text-xs font-bold text-slate-900">
+                          Đơn Hàng Của Tôi
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-red-600">
+                        Xem đơn &rarr;
+                      </span>
+                    </div>
+                  </Link>
                   <Link
                     to="/account"
                     onClick={() => setMobileMenuOpen(false)}
