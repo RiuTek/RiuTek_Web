@@ -59,6 +59,67 @@ export async function getProducts(
     params.sortBy = filters.sortBy
   }
 
+  // 15 Technical Filters cho PC Builder & Catalog
+  if (filters.socket !== undefined) {
+    params.socket = filters.socket
+  }
+
+  if (filters.memoryType !== undefined) {
+    params.memoryType = filters.memoryType
+  }
+
+  if (filters.motherboardFormFactor !== undefined) {
+    params.motherboardFormFactor = filters.motherboardFormFactor
+  }
+
+  if (filters.ramFormFactor !== undefined) {
+    params.ramFormFactor = filters.ramFormFactor
+  }
+
+  if (filters.storageType !== undefined) {
+    params.storageType = filters.storageType
+  }
+
+  if (filters.storageInterface !== undefined) {
+    params.storageInterface = filters.storageInterface
+  }
+
+  if (filters.psuEfficiency !== undefined) {
+    params.psuEfficiency = filters.psuEfficiency
+  }
+
+  if (filters.psuModularity !== undefined) {
+    params.psuModularity = filters.psuModularity
+  }
+
+  if (filters.psuFormFactor !== undefined) {
+    params.psuFormFactor = filters.psuFormFactor
+  }
+
+  if (filters.coolerType !== undefined) {
+    params.coolerType = filters.coolerType
+  }
+
+  if (typeof filters.hasIntegratedGpu === 'boolean') {
+    params.hasIntegratedGpu = filters.hasIntegratedGpu
+  }
+
+  if (typeof filters.hasWifi === 'boolean') {
+    params.hasWifi = filters.hasWifi
+  }
+
+  if (typeof filters.hasRgb === 'boolean') {
+    params.hasRgb = filters.hasRgb
+  }
+
+  if (typeof filters.has12VHPWR === 'boolean') {
+    params.has12VHPWR = filters.has12VHPWR
+  }
+
+  if (typeof filters.requires12VHPWR === 'boolean') {
+    params.requires12VHPWR = filters.requires12VHPWR
+  }
+
   return apiClient.get<PagedResult<ProductSummary>>('/products', {
     params,
     signal,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import {
   Search,
   RotateCcw,
@@ -22,13 +22,20 @@ import {
 import {
   ComponentType,
   ProductSortOption,
+  type ProductFilterParams,
   type ProductSummary,
 } from '../../products/productTypes'
 import {
   isSingleChoiceComponent,
   MAX_MULTI_CHOICE_QUANTITY,
+  getSlotApplicableTechnicalFilters,
 } from '../pcBuilderConstants'
-import type { SelectedPCBuildItem } from '../pcBuilderTypes'
+import type {
+  PCBuilderTechnicalFilterState,
+  SelectedPCBuildItem,
+} from '../pcBuilderTypes'
+import { EMPTY_TECHNICAL_FILTERS } from '../pcBuilderTypes'
+import { PCBuilderTechnicalFilters } from './PCBuilderTechnicalFilters'
 
 interface PCBuilderProductPickerModalProps {
   activeSlot: ComponentType
@@ -81,6 +88,8 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   const [isActiveFilter, setIsActiveFilter] = useState<'all' | 'true' | 'false'>('all')
   const [minPriceInput, setMinPriceInput] = useState('')
   const [maxPriceInput, setMaxPriceInput] = useState('')
+  const [technicalFilters, setTechnicalFilters] =
+    useState<PCBuilderTechnicalFilterState>(EMPTY_TECHNICAL_FILTERS)
 
   // Pagination states
   const [pageIndex, setPageIndex] = useState(1)
@@ -147,6 +156,17 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     setPageIndex(1)
   }
 
+  const handleTechnicalFilterChange = <K extends keyof PCBuilderTechnicalFilterState>(
+    key: K,
+    value: PCBuilderTechnicalFilterState[K]
+  ) => {
+    setTechnicalFilters((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+    setPageIndex(1)
+  }
+
   // Validate price range
   const parsedMinPrice = minPriceInput ? Math.max(0, parseInt(minPriceInput, 10) || 0) : undefined
   const parsedMaxPrice = maxPriceInput ? Math.max(0, parseInt(maxPriceInput, 10) || 0) : undefined
@@ -158,7 +178,7 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
       ? 'Giá tối thiểu không được lớn hơn giá tối đa.'
       : null
 
-  // Reset all filters
+  // Reset all filters (cả generic và technical filters)
   const handleResetFilters = () => {
     setSearchTerm('')
     setDebouncedSearch('')
@@ -167,21 +187,36 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     setIsActiveFilter('all')
     setMinPriceInput('')
     setMaxPriceInput('')
+    setTechnicalFilters(EMPTY_TECHNICAL_FILTERS)
     setPageIndex(1)
   }
 
+  // Lọc chính xác các field kỹ thuật cho slot hiện tại
+  const applicableFilters = useMemo(
+    () => getSlotApplicableTechnicalFilters(activeSlot, technicalFilters),
+    [activeSlot, technicalFilters]
+  )
+  const serializedTechFilters = useMemo(
+    () =>
+      Object.entries(applicableFilters)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => `${k}:${String(v)}`)
+        .join(';'),
+    [applicableFilters]
+  )
+
   // Current request key to derive loading state synchronously
-  const requestKey = `${activeSlot}|${debouncedSearch}|${sortBy}|${inStockFilter}|${isActiveFilter}|${parsedMinPrice}|${parsedMaxPrice}|${pageIndex}|${retryTrigger}`
-  const isLoading = completedKey !== requestKey
+  const requestKey = `${activeSlot}|${debouncedSearch}|${sortBy}|${inStockFilter}|${isActiveFilter}|${parsedMinPrice ?? ''}|${parsedMaxPrice ?? ''}|${serializedTechFilters}|${pageIndex}|${retryTrigger}`
+  const isLoading = !priceValidationError && completedKey !== requestKey
 
   // Fetch products with latest-request guard
   useEffect(() => {
-    // Không gửi request nếu khoảng giá không hợp lệ
-    if (
-      parsedMinPrice !== undefined &&
-      parsedMaxPrice !== undefined &&
-      parsedMinPrice > parsedMaxPrice
-    ) {
+    // Khi price range invalid: abort request đang chạy và vô hiệu hóa latest-request guard
+    if (priceValidationError) {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+      activeFetchIdRef.current++
       return
     }
 
@@ -194,22 +229,22 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     const fetchId = ++activeFetchIdRef.current
     const currentKey = requestKey
 
-    getProducts(
-      {
-        componentType: activeSlot,
-        pageIndex,
-        pageSize,
-        searchTerm: debouncedSearch || undefined,
-        sortBy,
-        inStock:
-          inStockFilter === 'true' ? true : inStockFilter === 'false' ? false : undefined,
-        isActive:
-          isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
-        minPrice: parsedMinPrice,
-        maxPrice: parsedMaxPrice,
-      },
-      controller.signal
-    )
+    const queryParams: ProductFilterParams = {
+      componentType: activeSlot,
+      pageIndex,
+      pageSize,
+      searchTerm: debouncedSearch || undefined,
+      sortBy,
+      inStock:
+        inStockFilter === 'true' ? true : inStockFilter === 'false' ? false : undefined,
+      isActive:
+        isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
+      minPrice: parsedMinPrice,
+      maxPrice: parsedMaxPrice,
+      ...applicableFilters,
+    }
+
+    getProducts(queryParams, controller.signal)
       .then((res) => {
         if (activeFetchIdRef.current !== fetchId || controller.signal.aborted) {
           return
@@ -248,7 +283,9 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     isActiveFilter,
     parsedMinPrice,
     parsedMaxPrice,
+    priceValidationError,
     requestKey,
+    applicableFilters,
   ])
 
   const slotTitle = COMPONENT_TYPE_LABELS[activeSlot] || 'Linh kiện'
@@ -290,9 +327,9 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
               </div>
               <h2 className="text-base sm:text-lg font-black flex items-center gap-2">
                 <span>{slotTitle}</span>
-                {!isLoading && (
+                {!isLoading && !priceValidationError && (
                   <span className="text-xs font-normal text-slate-400">
-                    ({totalCount} sản phẩm khả dụng)
+                    ({totalCount} sản phẩm)
                   </span>
                 )}
               </h2>
@@ -341,7 +378,9 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
             <button
               type="button"
               onClick={() => setShowMobileFilters((prev) => !prev)}
-              className="sm:hidden px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5"
+              aria-expanded={showMobileFilters}
+              aria-controls="pc-picker-filters-sidebar"
+              className="sm:hidden px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 shadow-2xs"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>Bộ lọc</span>
@@ -372,10 +411,11 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
         </div>
 
         {/* Modal Center Layout: Filters Sidebar + Products List */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col sm:flex-row overflow-hidden min-h-0">
           {/* Filters Sidebar */}
           <div
-            className={`w-full sm:w-64 bg-slate-50/80 border-r border-slate-200 p-4 space-y-5 overflow-y-auto flex-shrink-0 ${
+            id="pc-picker-filters-sidebar"
+            className={`w-full sm:w-64 bg-slate-50/80 border-b sm:border-b-0 sm:border-r border-slate-200 p-4 space-y-5 overflow-y-auto flex-shrink-0 max-h-64 sm:max-h-none ${
               showMobileFilters ? 'block' : 'hidden sm:block'
             }`}
           >
@@ -495,11 +535,40 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
                 )}
               </div>
             </div>
+
+            {/* Bộ lọc kỹ thuật theo activeSlot */}
+            <PCBuilderTechnicalFilters
+              activeSlot={activeSlot}
+              technicalFilters={technicalFilters}
+              onChange={handleTechnicalFilterChange}
+            />
           </div>
 
           {/* Product Listing Main Scroll Area */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-            {isLoading ? (
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            {priceValidationError ? (
+              <div
+                role="alert"
+                className="py-16 text-center space-y-3 bg-amber-50/70 border border-amber-200 rounded-2xl p-6 text-amber-900"
+              >
+                <DollarSign className="w-10 h-10 text-amber-500 mx-auto" />
+                <h3 className="text-sm font-bold">Khoảng giá không hợp lệ</h3>
+                <p className="text-xs text-amber-700 max-w-md mx-auto">
+                  {priceValidationError} Vui lòng điều chỉnh lại giá tối thiểu nhỏ hơn hoặc bằng giá tối đa để tiếp tục tìm kiếm.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMinPriceInput('')
+                    setMaxPriceInput('')
+                    setPageIndex(1)
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+                >
+                  <span>Xóa khoảng giá</span>
+                </button>
+              </div>
+            ) : isLoading ? (
               <div className="py-24 text-center space-y-3" aria-busy="true">
                 <Loader2 className="w-8 h-8 text-red-600 animate-spin mx-auto" />
                 <p className="text-xs sm:text-sm text-slate-500">
@@ -672,7 +741,7 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
         {/* Modal Footer Bar */}
         <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 flex-shrink-0">
           {/* Pagination Controls */}
-          {!isLoading && totalPages > 1 ? (
+          {!isLoading && !priceValidationError && totalPages > 1 ? (
             <div className="flex items-center gap-3 text-xs">
               <button
                 type="button"
@@ -698,9 +767,15 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
                 <ChevronRight className="w-4 h-4" />
               </button>
             </div>
-          ) : (
+          ) : !isLoading && !priceValidationError ? (
             <div className="text-xs text-slate-400">
               Hiển thị {products.length} trên tổng số {totalCount} sản phẩm
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">
+              {priceValidationError
+                ? 'Đang chờ điều chỉnh khoảng giá hợp lệ'
+                : 'Đang tải dữ liệu...'}
             </div>
           )}
 

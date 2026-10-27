@@ -2,6 +2,16 @@ import type {
   ComponentSpecification,
   ComponentType,
   ProductSummary,
+  CpuSocket,
+  RamType,
+  MotherboardFormFactor,
+  RamFormFactor,
+  StorageType,
+  StorageInterface,
+  PsuEfficiency,
+  PsuModularity,
+  PsuFormFactor,
+  CoolerType,
 } from '../products/productTypes'
 
 /**
@@ -72,3 +82,26 @@ export interface SelectedPCBuildItem {
   product: ProductSummary
   quantity: number
 }
+
+/**
+ * State của 15 bộ lọc kỹ thuật cho PC Builder modal
+ */
+export interface PCBuilderTechnicalFilterState {
+  socket?: CpuSocket
+  memoryType?: RamType
+  motherboardFormFactor?: MotherboardFormFactor
+  ramFormFactor?: RamFormFactor
+  storageType?: StorageType
+  storageInterface?: StorageInterface
+  psuEfficiency?: PsuEfficiency
+  psuModularity?: PsuModularity
+  psuFormFactor?: PsuFormFactor
+  coolerType?: CoolerType
+  hasIntegratedGpu?: boolean
+  hasWifi?: boolean
+  hasRgb?: boolean
+  has12VHPWR?: boolean
+  requires12VHPWR?: boolean
+}
+
+export const EMPTY_TECHNICAL_FILTERS: Readonly<PCBuilderTechnicalFilterState> = Object.freeze({})

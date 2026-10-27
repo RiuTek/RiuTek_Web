@@ -72,6 +72,21 @@ export interface ProductFilterParams {
   inStock?: boolean
   isActive?: boolean
   sortBy?: ProductSortOption
+  socket?: CpuSocket
+  memoryType?: RamType
+  motherboardFormFactor?: MotherboardFormFactor
+  ramFormFactor?: RamFormFactor
+  storageType?: StorageType
+  storageInterface?: StorageInterface
+  psuEfficiency?: PsuEfficiency
+  psuModularity?: PsuModularity
+  psuFormFactor?: PsuFormFactor
+  coolerType?: CoolerType
+  hasIntegratedGpu?: boolean
+  hasWifi?: boolean
+  hasRgb?: boolean
+  has12VHPWR?: boolean
+  requires12VHPWR?: boolean
 }
 
 /**

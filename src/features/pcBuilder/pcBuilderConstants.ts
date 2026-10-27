@@ -1,4 +1,5 @@
 import { ComponentType } from '../products/productTypes'
+import type { PCBuilderTechnicalFilterState } from './pcBuilderTypes'
 
 /**
  * Thứ tự hiển thị 9 nhóm linh kiện trong PC Builder theo đặc tả
@@ -78,4 +79,86 @@ export const PC_BUILDER_ERROR_MESSAGES: Record<string, string> = {
   'PCBuild.MultipleSingleChoiceComponents':
     'Chỉ được chọn 1 sản phẩm cho linh kiện đơn lẻ (CPU, Mainboard, GPU, Nguồn, Case, Tản nhiệt).',
   'PCBuild.InvalidSingleChoiceQuantity': 'Số lượng của linh kiện đơn lẻ phải bằng 1.',
+}
+
+/**
+ * Lọc ra chính xác các field kỹ thuật áp dụng cho slot hiện tại để đảm bảo không gửi field thừa lên Backend
+ */
+export function getSlotApplicableTechnicalFilters(
+  activeSlot: ComponentType,
+  filters: PCBuilderTechnicalFilterState
+): Partial<PCBuilderTechnicalFilterState> {
+  const result: Partial<PCBuilderTechnicalFilterState> = {}
+
+  switch (activeSlot) {
+    case ComponentType.CPU:
+      if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (typeof filters.hasIntegratedGpu === 'boolean') {
+        result.hasIntegratedGpu = filters.hasIntegratedGpu
+      }
+      break
+
+    case ComponentType.Motherboard:
+      if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (filters.motherboardFormFactor !== undefined) {
+        result.motherboardFormFactor = filters.motherboardFormFactor
+      }
+      if (typeof filters.hasWifi === 'boolean') {
+        result.hasWifi = filters.hasWifi
+      }
+      break
+
+    case ComponentType.GPU:
+      if (typeof filters.requires12VHPWR === 'boolean') {
+        result.requires12VHPWR = filters.requires12VHPWR
+      }
+      break
+
+    case ComponentType.RAM:
+      if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (filters.ramFormFactor !== undefined) result.ramFormFactor = filters.ramFormFactor
+      if (typeof filters.hasRgb === 'boolean') {
+        result.hasRgb = filters.hasRgb
+      }
+      break
+
+    case ComponentType.Storage:
+      if (filters.storageType !== undefined) result.storageType = filters.storageType
+      if (filters.storageInterface !== undefined) {
+        result.storageInterface = filters.storageInterface
+      }
+      break
+
+    case ComponentType.PSU:
+      if (filters.psuEfficiency !== undefined) result.psuEfficiency = filters.psuEfficiency
+      if (filters.psuModularity !== undefined) result.psuModularity = filters.psuModularity
+      if (filters.psuFormFactor !== undefined) result.psuFormFactor = filters.psuFormFactor
+      if (typeof filters.has12VHPWR === 'boolean') {
+        result.has12VHPWR = filters.has12VHPWR
+      }
+      break
+
+    case ComponentType.Case:
+      if (filters.motherboardFormFactor !== undefined) {
+        result.motherboardFormFactor = filters.motherboardFormFactor
+      }
+      break
+
+    case ComponentType.Cooler:
+      if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.coolerType !== undefined) result.coolerType = filters.coolerType
+      if (typeof filters.hasRgb === 'boolean') {
+        result.hasRgb = filters.hasRgb
+      }
+      break
+
+    case ComponentType.Accessory:
+    default:
+      // Không có technical filters cho Accessory
+      break
+  }
+
+  return result
 }
