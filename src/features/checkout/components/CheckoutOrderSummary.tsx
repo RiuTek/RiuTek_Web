@@ -100,7 +100,7 @@ export const CheckoutOrderSummary: React.FC<CheckoutOrderSummaryProps> = ({
         <div className="p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-2xl space-y-1.5">
           <p className="font-semibold">Vui lòng chọn địa chỉ giao hàng</p>
           <p className="text-[11px] text-amber-700">
-            Hệ thống cần thông tin địa chỉ để xác định phí vận chuyển và tính toán báo giá chính xác.
+            Vui lòng chọn địa chỉ nhận hàng để hệ thống tạo báo giá và đơn hàng.
           </p>
         </div>
       )}
@@ -184,7 +184,7 @@ export const CheckoutOrderSummary: React.FC<CheckoutOrderSummaryProps> = ({
           <div className="pt-3 border-t border-slate-100 flex items-baseline justify-between">
             <div>
               <span className="text-sm font-black text-slate-950">Tổng thanh toán:</span>
-              <p className="text-[10px] text-slate-400">Đã bao gồm thuế GTGT</p>
+              <p className="text-[10px] text-slate-400">Tổng tiền theo báo giá hiện tại</p>
             </div>
             <span className="text-xl sm:text-2xl font-black text-red-600">
               {formatVnd(quote.finalAmount)}
@@ -251,10 +251,10 @@ export const CheckoutOrderSummary: React.FC<CheckoutOrderSummaryProps> = ({
         )}
       </button>
 
-      {/* Policy Security Note */}
+      {/* Backend Verification Note */}
       <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl flex items-center gap-2 text-[11px] text-slate-500">
         <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-        <span>Bảo hành chính hãng 100% & kiểm tra hàng trước khi thanh toán</span>
+        <span>Giá và tồn kho được Backend kiểm tra lại khi tạo đơn hàng.</span>
       </div>
     </div>
   )

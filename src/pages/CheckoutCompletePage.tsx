@@ -4,13 +4,13 @@ import {
   CheckCircle2,
   Clock,
   Package,
-  ShoppingBag,
   MapPin,
   RefreshCw,
   AlertTriangle,
   Loader2,
   ArrowRight,
 } from 'lucide-react'
+import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { getMyOrderById } from '../features/checkout/checkoutApi'
 import {
@@ -34,15 +34,17 @@ export const CheckoutCompletePage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const { user, getAccessToken } = useAuth()
 
+  // Xác định orderId từ query param hoặc pending Stripe checkout metadata và chụp ổn định trong state
+  const queryOrderId = searchParams.get('orderId')
+  const initialPending = user?.id ? getPendingStripeCheckout(user.id) : null
+  const [targetOrderId] = useState<string | null>(
+    () => queryOrderId ?? initialPending?.orderId ?? null
+  )
+
   const [order, setOrder] = useState<OrderDetailDto | null>(null)
   const [isLoading, setIsLoading] = useState(() => Boolean(targetOrderId))
   const [loadError, setLoadError] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
-
-  // Xác định orderId từ query param hoặc pending Stripe checkout metadata
-  const paramOrderId = searchParams.get('orderId')
-  const pendingStripe = user?.id ? getPendingStripeCheckout(user.id) : null
-  const targetOrderId = paramOrderId ?? pendingStripe?.orderId ?? null
 
   const handleManualRefresh = async () => {
     if (!targetOrderId || isRefreshing) return
@@ -57,19 +59,29 @@ export const CheckoutCompletePage: React.FC = () => {
       try {
         result = await getMyOrderById(targetOrderId, token)
       } catch (err: unknown) {
-        token = await getAccessToken(true)
-        if (!token) throw err
-        result = await getMyOrderById(targetOrderId, token)
+        if (err instanceof ApiError && err.status === 401) {
+          token = await getAccessToken(true)
+          if (!token) throw err
+          result = await getMyOrderById(targetOrderId, token)
+        } else {
+          throw err
+        }
       }
 
       setOrder(result)
 
-      if (
+      const shouldClearPending =
+        result.paymentStatus === 'Completed' ||
+        result.paymentStatus === 'Failed' ||
+        result.paymentStatus === 'Refunded' ||
         result.status === 'Confirmed' ||
         result.status === 'Processing' ||
+        result.status === 'Shipping' ||
         result.status === 'Completed' ||
-        result.paymentStatus === 'Completed'
-      ) {
+        result.status === 'Cancelled' ||
+        result.status === 'Refunded'
+
+      if (shouldClearPending) {
         clearPendingStripeCheckout()
       }
     } catch {
@@ -93,20 +105,30 @@ export const CheckoutCompletePage: React.FC = () => {
         return getMyOrderById(targetOrderId, token, abortController.signal)
       })
       .catch((err: unknown) => {
-        return getAccessToken(true).then((newToken) => {
-          if (!newToken) throw err
-          return getMyOrderById(targetOrderId, newToken, abortController.signal)
-        })
+        if (err instanceof ApiError && err.status === 401) {
+          return getAccessToken(true).then((newToken) => {
+            if (!newToken) throw err
+            return getMyOrderById(targetOrderId, newToken, abortController.signal)
+          })
+        }
+        throw err
       })
       .then((result) => {
         if (!cancelled) {
           setOrder(result)
-          if (
+
+          const shouldClearPending =
+            result.paymentStatus === 'Completed' ||
+            result.paymentStatus === 'Failed' ||
+            result.paymentStatus === 'Refunded' ||
             result.status === 'Confirmed' ||
             result.status === 'Processing' ||
+            result.status === 'Shipping' ||
             result.status === 'Completed' ||
-            result.paymentStatus === 'Completed'
-          ) {
+            result.status === 'Cancelled' ||
+            result.status === 'Refunded'
+
+          if (shouldClearPending) {
             clearPendingStripeCheckout()
           }
           setIsLoading(false)
@@ -206,10 +228,17 @@ export const CheckoutCompletePage: React.FC = () => {
     )
   }
 
-  // Nhận diện trạng thái Stripe pending xác nhận
-  const isStripePending =
+  // Phân loại trạng thái hiển thị
+  const isPending =
     order.paymentMethod === 'Stripe' &&
-    (order.status === 'PendingPayment' || order.paymentStatus === 'Pending')
+    order.status === 'PendingPayment' &&
+    order.paymentStatus === 'Pending'
+
+  const isFailedOrCancelled =
+    order.status === 'Cancelled' ||
+    order.status === 'Refunded' ||
+    order.paymentStatus === 'Failed' ||
+    order.paymentStatus === 'Refunded'
 
   const statusLabel = ORDER_STATUS_LABELS[order.status] ?? order.status
   const paymentStatusLabel =
@@ -218,35 +247,19 @@ export const CheckoutCompletePage: React.FC = () => {
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
       {/* Hero Notification Banner */}
-      <div
-        className={`p-6 sm:p-8 rounded-3xl border text-center space-y-3 ${
-          isStripePending
-            ? 'bg-amber-50/60 border-amber-200 text-amber-950'
-            : 'bg-emerald-50/60 border-emerald-200 text-emerald-950'
-        }`}
-      >
-        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-xs bg-white">
-          {isStripePending ? (
+      {isPending ? (
+        <div className="p-6 sm:p-8 rounded-3xl border text-center space-y-3 bg-amber-50/60 border-amber-200 text-amber-950">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-xs bg-white">
             <Clock className="w-7 h-7 text-amber-600" />
-          ) : (
-            <CheckCircle2 className="w-7 h-7 text-emerald-600" />
-          )}
-        </div>
-
-        <div className="space-y-1">
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight">
-            {isStripePending
-              ? 'Đang Xác Nhận Thanh Toán'
-              : 'Đặt Hàng Thành Công!'}
-          </h1>
-          <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
-            {isStripePending
-              ? 'Giao dịch qua cổng Stripe đang được xử lý và đồng bộ với hệ thống. Vui lòng chờ hoặc bấm tải lại trạng thái.'
-              : `Cảm ơn bạn! Đơn hàng #${order.orderNumber} đã được ghi nhận và đang được xử lý chuẩn bị giao.`}
-          </p>
-        </div>
-
-        {isStripePending && (
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight">
+              Đang Xác Nhận Thanh Toán
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
+              Giao dịch qua cổng Stripe đang được xử lý và đồng bộ với hệ thống. Vui lòng chờ hoặc bấm tải lại trạng thái.
+            </p>
+          </div>
           <div className="pt-2">
             <button
               type="button"
@@ -258,8 +271,36 @@ export const CheckoutCompletePage: React.FC = () => {
               <span>Cập nhật trạng thái thanh toán</span>
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      ) : isFailedOrCancelled ? (
+        <div className="p-6 sm:p-8 rounded-3xl border text-center space-y-3 bg-rose-50/60 border-rose-200 text-rose-950">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-xs bg-white">
+            <AlertTriangle className="w-7 h-7 text-rose-600" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-rose-950">
+              Đơn Hàng Không Thành Công
+            </h1>
+            <p className="text-xs sm:text-sm text-rose-800 max-w-lg mx-auto">
+              Đơn hàng không còn ở trạng thái thanh toán thành công (Trạng thái đơn: {statusLabel} | Thanh toán: {paymentStatusLabel}).
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="p-6 sm:p-8 rounded-3xl border text-center space-y-3 bg-emerald-50/60 border-emerald-200 text-emerald-950">
+          <div className="w-14 h-14 rounded-2xl flex items-center justify-center mx-auto shadow-xs bg-white">
+            <CheckCircle2 className="w-7 h-7 text-emerald-600" />
+          </div>
+          <div className="space-y-1">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight">
+              Đặt Hàng Thành Công!
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-lg mx-auto">
+              Cảm ơn bạn! Đơn hàng #{order.orderNumber} đã được ghi nhận và đang được xử lý.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Order Details Card */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8 space-y-6">
@@ -314,27 +355,19 @@ export const CheckoutCompletePage: React.FC = () => {
           <div className="divide-y divide-slate-100">
             {order.items.map((item) => (
               <div
-                key={item.id}
+                key={item.productId}
                 className="py-3 flex items-center justify-between gap-4 text-xs"
               >
                 <div className="flex items-center gap-3 min-w-0">
-                  {item.imageUrl ? (
-                    <img
-                      src={item.imageUrl}
-                      alt={item.productName}
-                      className="w-10 h-10 rounded-xl object-contain bg-slate-50 border border-slate-200 p-1 flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-300 flex-shrink-0">
-                      <ShoppingBag className="w-4 h-4" />
-                    </div>
-                  )}
+                  <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 flex-shrink-0">
+                    <Package className="w-5 h-5" />
+                  </div>
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 truncate" title={item.productName}>
                       {item.productName}
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      {formatVnd(item.unitPrice)} × {item.quantity}
+                      SKU: {item.productSku} | {formatVnd(item.unitPrice)} × {item.quantity}
                     </p>
                   </div>
                 </div>

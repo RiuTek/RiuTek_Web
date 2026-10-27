@@ -59,31 +59,86 @@ export function getPendingStripeCheckout(
     const raw = sessionStorage.getItem(PENDING_STRIPE_STORAGE_KEY)
     if (!raw) return null
 
-    const parsed = JSON.parse(raw) as Partial<PendingStripeCheckout>
-
-    if (parsed.version !== 1 || !parsed.userId || !parsed.orderId) {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (!parsed || typeof parsed !== 'object') {
       clearPendingStripeCheckout()
       return null
     }
 
-    if (parsed.userId !== currentUserId) {
-      // Thuộc về tài khoản khác -> không sử dụng
+    if (parsed.version !== 1) {
       clearPendingStripeCheckout()
       return null
     }
 
-    if (parsed.createdAt) {
-      const createdTime = new Date(parsed.createdAt).getTime()
-      if (
-        isNaN(createdTime) ||
-        Date.now() - createdTime > PENDING_STRIPE_TTL_MS
-      ) {
-        clearPendingStripeCheckout()
-        return null
-      }
+    if (
+      typeof parsed.userId !== 'string' ||
+      !parsed.userId.trim() ||
+      parsed.userId !== currentUserId
+    ) {
+      clearPendingStripeCheckout()
+      return null
     }
 
-    return parsed as PendingStripeCheckout
+    if (typeof parsed.orderId !== 'string' || !parsed.orderId.trim()) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    if (typeof parsed.orderNumber !== 'string' || !parsed.orderNumber.trim()) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    if (
+      typeof parsed.idempotencyKey !== 'string' ||
+      parsed.idempotencyKey.trim().length < 16 ||
+      parsed.idempotencyKey.trim().length > 128
+    ) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    if (typeof parsed.addressId !== 'string' || !parsed.addressId.trim()) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    if (
+      typeof parsed.expectedCartVersion !== 'number' ||
+      !Number.isInteger(parsed.expectedCartVersion) ||
+      parsed.expectedCartVersion < 1
+    ) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    if (typeof parsed.createdAt !== 'string') {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    const createdTime = new Date(parsed.createdAt).getTime()
+    if (isNaN(createdTime)) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    const age = Date.now() - createdTime
+    if (age < 0 || age > PENDING_STRIPE_TTL_MS) {
+      clearPendingStripeCheckout()
+      return null
+    }
+
+    return {
+      version: 1,
+      userId: parsed.userId,
+      orderId: parsed.orderId,
+      orderNumber: parsed.orderNumber,
+      idempotencyKey: parsed.idempotencyKey.trim(),
+      addressId: parsed.addressId,
+      expectedCartVersion: parsed.expectedCartVersion,
+      createdAt: parsed.createdAt,
+    }
   } catch {
     clearPendingStripeCheckout()
     return null

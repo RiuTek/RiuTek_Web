@@ -69,9 +69,10 @@ export const CheckoutAddressSelector: React.FC<CheckoutAddressSelectorProps> = (
           <button
             type="button"
             onClick={onRetry}
-            className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 self-end sm:self-auto"
+            disabled={isLoading}
+            className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 flex items-center gap-1.5 self-end sm:self-auto"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
             <span>Thử lại</span>
           </button>
         </div>

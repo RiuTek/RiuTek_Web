@@ -51,11 +51,9 @@ export interface CheckoutCartRequest {
 }
 
 export interface OrderItemDto {
-  id: string
   productId: string
   productName: string
-  sku: string
-  imageUrl: string
+  productSku: string
   unitPrice: number
   quantity: number
   totalPrice: number

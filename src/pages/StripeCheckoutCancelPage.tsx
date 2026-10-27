@@ -47,9 +47,13 @@ export const StripeCheckoutCancelPage: React.FC = () => {
       try {
         order = await checkoutCart(request, pending.idempotencyKey, token)
       } catch (err: unknown) {
-        token = await getAccessToken(true)
-        if (!token) throw err
-        order = await checkoutCart(request, pending.idempotencyKey, token)
+        if (err instanceof ApiError && err.status === 401) {
+          token = await getAccessToken(true)
+          if (!token) throw err
+          order = await checkoutCart(request, pending.idempotencyKey, token)
+        } else {
+          throw err
+        }
       }
 
       const action = order.paymentAction

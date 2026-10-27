@@ -28,6 +28,12 @@ export const CheckoutPage: React.FC = () => {
     handleCheckout,
   } = useCartCheckout()
 
+  const handleRetryAddresses = () => {
+    loadAddresses().catch(() => {
+      // Lỗi được lưu và hiển thị trong AddressContext
+    })
+  }
+
   // Nếu giỏ hàng rỗng, hiển thị empty state
   if (cart && cart.items.length === 0) {
     return (
@@ -85,7 +91,7 @@ export const CheckoutPage: React.FC = () => {
             onSelectAddress={setSelectedAddressId}
             isLoading={addressStatus === 'loading'}
             error={addressError}
-            onRetry={loadAddresses}
+            onRetry={handleRetryAddresses}
           />
 
           <CheckoutPaymentSelector
