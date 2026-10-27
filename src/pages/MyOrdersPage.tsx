@@ -30,6 +30,11 @@ const VALID_STATUSES: OrderStatus[] = [
   'Refunded',
 ]
 
+interface QueryError {
+  queryKey: string
+  message: string
+}
+
 export const MyOrdersPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const { getAccessToken } = useAuth()
@@ -46,14 +51,17 @@ export const MyOrdersPage: React.FC = () => {
       : undefined
 
   const [data, setData] = useState<PagedResult<OrderSummaryDto> | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [queryError, setQueryError] = useState<QueryError | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   // Track the query key currently being fetched / displayed
   const currentQueryKey = `${currentPage}-${currentStatus ?? ''}-${reloadKey}`
   const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null)
 
-  const isLoading = loadedQueryKey !== currentQueryKey && error === null
+  const currentError =
+    queryError?.queryKey === currentQueryKey ? queryError.message : null
+  const isLoading =
+    loadedQueryKey !== currentQueryKey && currentError === null
 
   // Handle filter changes
   const handleStatusChange = (status?: OrderStatus) => {
@@ -75,7 +83,7 @@ export const MyOrdersPage: React.FC = () => {
   }
 
   const handleRetry = () => {
-    setError(null)
+    setQueryError(null)
     setReloadKey((prev) => prev + 1)
   }
 
@@ -116,16 +124,18 @@ export const MyOrdersPage: React.FC = () => {
       .then((res) => {
         if (!cancelled) {
           setData(res)
-          setError(null)
+          setQueryError(null)
           setLoadedQueryKey(currentQueryKey)
         }
       })
       .catch((err: unknown) => {
         if (cancelled) return
         if (err instanceof Error && err.name === 'AbortError') return
-        setError(
-          'Không thể tải danh sách đơn hàng. Vui lòng kiểm tra kết nối mạng và thử lại.'
-        )
+        setQueryError({
+          queryKey: currentQueryKey,
+          message:
+            'Không thể tải danh sách đơn hàng. Vui lòng kiểm tra kết nối mạng và thử lại.',
+        })
         setLoadedQueryKey(currentQueryKey)
       })
 
@@ -190,14 +200,14 @@ export const MyOrdersPage: React.FC = () => {
       </div>
 
       {/* Error State */}
-      {error && (
+      {currentError && (
         <div
           role="alert"
           className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs"
         >
           <div className="flex items-center gap-2.5">
             <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0" />
-            <span>{error}</span>
+            <span>{currentError}</span>
           </div>
           <button
             type="button"
@@ -241,7 +251,7 @@ export const MyOrdersPage: React.FC = () => {
       )}
 
       {/* Empty States */}
-      {!isLoading && !error && data && data.items.length === 0 && (
+      {!isLoading && !currentError && data && data.items.length === 0 && (
         <div className="bg-white rounded-3xl border border-slate-200/80 p-8 sm:p-12 text-center space-y-4 shadow-xs">
           <div className="w-16 h-16 rounded-3xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
             <Package className="w-8 h-8" />
@@ -283,7 +293,7 @@ export const MyOrdersPage: React.FC = () => {
       )}
 
       {/* Order List */}
-      {!isLoading && !error && data && data.items.length > 0 && (
+      {!isLoading && !currentError && data && data.items.length > 0 && (
         <div className="space-y-4">
           <div className="space-y-4">
             {data.items.map((order) => (

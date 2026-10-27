@@ -52,20 +52,32 @@ function formatCreatedAt(dateStr: string): string {
   }
 }
 
+interface QueryError {
+  queryKey: string
+  message: string
+}
+
 export const OrderDetailPage: React.FC = () => {
   const { orderId } = useParams<{ orderId: string }>()
   const { user, getAccessToken } = useAuth()
 
   const [order, setOrder] = useState<OrderDetailDto | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [queryError, setQueryError] = useState<QueryError | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
 
   // Track the query key currently being fetched / displayed
   const currentQueryKey = `${orderId ?? ''}-${reloadKey}`
   const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null)
 
+  const currentLoadError =
+    queryError?.queryKey === currentQueryKey ? queryError.message : null
+
+  const isCurrentOrder = order !== null && order.id === orderId
+
   const isLoading =
-    Boolean(orderId) && loadedQueryKey !== currentQueryKey && loadError === null
+    Boolean(orderId) &&
+    (loadedQueryKey !== currentQueryKey || !isCurrentOrder) &&
+    currentLoadError === null
 
   // Cancellation states
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
@@ -75,7 +87,9 @@ export const OrderDetailPage: React.FC = () => {
   const [cancelSuccessMsg, setCancelSuccessMsg] = useState<string | null>(null)
 
   const handleRetry = () => {
-    setLoadError(null)
+    setQueryError(null)
+    setCancelError(null)
+    setCancelConflict(false)
     setReloadKey((prev) => prev + 1)
   }
 
@@ -103,16 +117,22 @@ export const OrderDetailPage: React.FC = () => {
       .then((res) => {
         if (!cancelled) {
           setOrder(res)
-          setLoadError(null)
+          setQueryError(null)
           setLoadedQueryKey(currentQueryKey)
+          setShowCancelConfirm(false)
+          setCancelError(null)
+          setCancelConflict(false)
+          setCancelSuccessMsg(null)
         }
       })
       .catch((err: unknown) => {
         if (cancelled) return
         if (err instanceof Error && err.name === 'AbortError') return
-        setLoadError(
-          'Không thể tải thông tin chi tiết đơn hàng. Đơn hàng có thể không tồn tại hoặc bạn không có quyền xem.'
-        )
+        setQueryError({
+          queryKey: currentQueryKey,
+          message:
+            'Không thể tải thông tin chi tiết đơn hàng. Đơn hàng có thể không tồn tại hoặc bạn không có quyền xem.',
+        })
         setLoadedQueryKey(currentQueryKey)
       })
 
@@ -180,7 +200,33 @@ export const OrderDetailPage: React.FC = () => {
     pendingStripe !== null &&
     pendingStripe.orderId === order.id
 
-  if (isLoading) {
+  if (!orderId) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-6">
+        <div className="w-16 h-16 rounded-3xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
+          <AlertTriangle className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-xl sm:text-2xl font-black text-slate-950">
+            Mã Đơn Hàng Không Hợp Lệ
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
+            Không tìm thấy mã đơn hàng trên đường dẫn. Vui lòng quay về danh sách đơn hàng.
+          </p>
+        </div>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <Link
+            to="/orders"
+            className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs sm:text-sm font-semibold transition-colors"
+          >
+            Về danh sách đơn hàng
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  if (isLoading || (!isCurrentOrder && !currentLoadError)) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="bg-white rounded-3xl border border-slate-200 p-8 space-y-6 animate-pulse">
@@ -198,7 +244,7 @@ export const OrderDetailPage: React.FC = () => {
     )
   }
 
-  if (loadError || !order) {
+  if (currentLoadError || !order || !isCurrentOrder) {
     return (
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-6">
         <div className="w-16 h-16 rounded-3xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto border border-rose-200">
@@ -209,7 +255,7 @@ export const OrderDetailPage: React.FC = () => {
             Không Thể Tải Đơn Hàng
           </h1>
           <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
-            {loadError ?? 'Đơn hàng không tìm thấy.'}
+            {currentLoadError ?? 'Đơn hàng không tìm thấy.'}
           </p>
         </div>
         <div className="flex items-center justify-center gap-3 pt-2">
