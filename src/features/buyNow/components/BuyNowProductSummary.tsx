@@ -4,6 +4,32 @@ import type { ProductDetail } from '../../products/productTypes'
 import type { PaymentMethod } from '../../orders/orderTypes'
 import { formatVnd } from '../../products/productConstants'
 
+interface ProductImageThumbnailProps {
+  url: string | null
+  alt: string
+}
+
+const ProductImageThumbnail: React.FC<ProductImageThumbnailProps> = ({
+  url,
+  alt,
+}) => {
+  const [hasError, setHasError] = React.useState(false)
+
+  if (!url || hasError) {
+    return <Package className="w-8 h-8 text-slate-300" aria-hidden="true" />
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className="w-full h-full object-contain"
+      loading="lazy"
+      onError={() => setHasError(true)}
+    />
+  )
+}
+
 interface BuyNowProductSummaryProps {
   product: ProductDetail
   quantity: number
@@ -46,20 +72,11 @@ export const BuyNowProductSummary: React.FC<BuyNowProductSummaryProps> = ({
       {/* Product Item Card */}
       <div className="flex items-center gap-4 p-3.5 rounded-2xl bg-slate-50/70 border border-slate-100">
         <div className="w-16 h-16 rounded-xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden flex-shrink-0 p-1">
-          {primaryImageUrl ? (
-            <img
-              src={primaryImageUrl}
-              alt={product.name}
-              className="w-full h-full object-contain"
-              loading="lazy"
-              onError={(e) => {
-                // Fallback nếu ảnh không tải được
-                e.currentTarget.style.display = 'none'
-              }}
-            />
-          ) : (
-            <Package className="w-8 h-8 text-slate-300" />
-          )}
+          <ProductImageThumbnail
+            key={primaryImageUrl ?? product.id}
+            url={primaryImageUrl}
+            alt={product.name}
+          />
         </div>
 
         <div className="min-w-0 flex-1 space-y-1">
@@ -141,7 +158,7 @@ export const BuyNowProductSummary: React.FC<BuyNowProductSummaryProps> = ({
       {/* Trust Badge */}
       <div className="pt-2 flex items-center justify-center gap-2 text-slate-400 text-xs text-center">
         <ShieldCheck className="w-4 h-4 text-slate-400" />
-        <span>Thanh toán an toàn • Linh kiện chính hãng</span>
+        <span>Thông tin đơn hàng được xác nhận trước khi tạo</span>
       </div>
     </div>
   )

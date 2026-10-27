@@ -16,6 +16,13 @@ import {
   validateStripeRedirectUrl,
 } from '../checkout/stripeCheckoutSession'
 
+function parseBuyNowQuantity(raw: string | null): number {
+  if (!raw || !/^\d+$/.test(raw)) return 1
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value) || value < 1) return 1
+  return Math.min(value, 99)
+}
+
 export function useProductBuyNow() {
   const { slug } = useParams<{ slug: string }>()
   const [searchParams] = useSearchParams()
@@ -39,9 +46,7 @@ export function useProductBuyNow() {
 
   // 2. Parse và validate quantity từ query string (1..99)
   const rawQtyParam = searchParams.get('quantity')
-  const parsedQty = rawQtyParam ? parseInt(rawQtyParam, 10) : 1
-  const normalizedUrlQty =
-    isNaN(parsedQty) || parsedQty < 1 ? 1 : Math.min(99, parsedQty)
+  const normalizedUrlQty = parseBuyNowQuantity(rawQtyParam)
 
   // Bounded theo stockQuantity của sản phẩm một khi product đã load
   const quantity = useMemo(() => {
