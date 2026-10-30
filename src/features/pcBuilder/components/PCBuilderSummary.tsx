@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
   XCircle,
@@ -12,11 +13,29 @@ import {
   Bookmark,
   Layers,
   ShoppingBag,
+  Check,
+  ArrowRight,
+  X,
 } from 'lucide-react'
+import { ApiError } from '../../../lib/api'
+import { useAuth } from '../../auth/AuthContext'
+import { UserRole } from '../../auth/authTypes'
+import { useCart } from '../../cart/CartContext'
 import { formatVnd } from '../../products/productConstants'
-import type { PCBuildPreviewResult } from '../pcBuilderTypes'
+import { createPCBuild } from '../pcBuilderApi'
+import {
+  PC_BUILDER_ERROR_MESSAGES,
+  PC_BUILDER_GUEST_STORAGE_KEY,
+} from '../pcBuilderConstants'
+import type {
+  MyPCBuild,
+  PCBuildItemInput,
+  PCBuildPreviewResult,
+  SelectedPCBuildItem,
+} from '../pcBuilderTypes'
 
 interface PCBuilderSummaryProps {
+  selectedItems: SelectedPCBuildItem[]
   previewResult: PCBuildPreviewResult | null
   isLoading: boolean
   error: string | null
@@ -26,7 +45,13 @@ interface PCBuilderSummaryProps {
   onClearAll: () => void
 }
 
+interface SavedBuildState {
+  build: MyPCBuild
+  configKeyAtSave: string
+}
+
 export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
+  selectedItems,
   previewResult,
   isLoading,
   error,
@@ -35,7 +60,41 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   itemCount,
   onClearAll,
 }) => {
+  const { status: authStatus, user, getAccessToken } = useAuth()
+  const { addFromPCBuild } = useCart()
+  const navigate = useNavigate()
+
   const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [buildName, setBuildName] = useState('')
+  const [buildDescription, setBuildDescription] = useState('')
+  const [saveValidationErrors, setSaveValidationErrors] = useState<{
+    name?: string
+    description?: string
+  }>({})
+  const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // State lưu trữ bản build vừa tạo thành công
+  const [savedBuildInfo, setSavedBuildInfo] = useState<SavedBuildState | null>(null)
+  const [isAddingToCart, setIsAddingToCart] = useState(false)
+  const [addToCartError, setAddToCartError] = useState<string | null>(null)
+  const [addToCartSuccess, setAddToCartSuccess] = useState(false)
+
+  // Config key hiện tại của selectedItems
+  const currentConfigKey = useMemo(() => {
+    if (selectedItems.length === 0) return ''
+    return selectedItems
+      .map((item) => `${item.product.id}:${item.quantity}`)
+      .sort()
+      .join(';')
+  }, [selectedItems])
+
+  // Kiểm tra xem cấu hình hiện tại có còn khớp với snapshot lúc save không
+  const isCurrentBuildSaved =
+    savedBuildInfo !== null &&
+    savedBuildInfo.configKeyAtSave === currentConfigKey &&
+    hasItems
 
   // Phân nhóm issues theo severity
   const issues = previewResult?.issues ?? []
@@ -44,6 +103,154 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   const infoIssues = issues.filter(
     (i) => i.severity !== 'Error' && i.severity !== 'Warning'
   )
+
+  // Mở form lưu cấu hình
+  const handleOpenSaveModal = () => {
+    if (!hasItems) return
+
+    // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu tạm vào sessionStorage rồi chuyển hướng sang login
+    if (authStatus === 'anonymous') {
+      try {
+        const guestData = {
+          savedAt: Date.now(),
+          items: selectedItems.map((item) => ({
+            product: item.product,
+            quantity: item.quantity,
+          })),
+        }
+        sessionStorage.setItem(
+          PC_BUILDER_GUEST_STORAGE_KEY,
+          JSON.stringify(guestData)
+        )
+      } catch {
+        // Tiếp tục navigate nếu sessionStorage bị chặn
+      }
+      navigate('/login', { state: { from: '/pc-builder' } })
+      return
+    }
+
+    // 2. Nếu auth đang checking hoặc unavailable
+    if (authStatus === 'checking') {
+      return
+    }
+    if (authStatus === 'unavailable') {
+      setSaveError('Dịch vụ xác thực tạm thời không khả dụng. Vui lòng thử lại sau.')
+      return
+    }
+
+    // 3. Nếu là Staff hoặc Admin: Backend không cho phép lưu
+    if (user && user.role !== UserRole.Customer) {
+      setSaveError('Chỉ tài khoản khách hàng (Customer) mới có thể lưu và quản lý cấu hình PC.')
+      setShowSaveModal(true)
+      return
+    }
+
+    // 4. Customer: Khởi tạo giá trị mặc định cho form
+    const defaultName = `Cấu hình PC - ${new Date().toLocaleDateString('vi-VN')}`
+    setBuildName(defaultName)
+    setBuildDescription('')
+    setSaveValidationErrors({})
+    setSaveError(null)
+    setAddToCartError(null)
+    setAddToCartSuccess(false)
+    setShowSaveModal(true)
+  }
+
+  // Submit lưu cấu hình
+  const handleSaveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (isSaving || !hasItems || !user || user.role !== UserRole.Customer) {
+      return
+    }
+
+    const trimmedName = buildName.trim()
+    const trimmedDesc = buildDescription.trim()
+
+    const errors: { name?: string; description?: string } = {}
+    if (!trimmedName) {
+      errors.name = 'Tên cấu hình PC không được để trống.'
+    } else if (trimmedName.length > 200) {
+      errors.name = 'Tên cấu hình PC không được vượt quá 200 ký tự.'
+    }
+
+    if (trimmedDesc.length > 1000) {
+      errors.description = 'Mô tả không được vượt quá 1000 ký tự.'
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setSaveValidationErrors(errors)
+      return
+    }
+
+    setSaveValidationErrors({})
+    setIsSaving(true)
+    setSaveError(null)
+
+    try {
+      const token = await getAccessToken(false)
+      if (!token) {
+        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+      }
+
+      const payloadItems: PCBuildItemInput[] = selectedItems.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+      }))
+
+      const result = await createPCBuild(
+        {
+          name: trimmedName,
+          description: trimmedDesc || null,
+          items: payloadItems,
+        },
+        token
+      )
+
+      setSavedBuildInfo({
+        build: result,
+        configKeyAtSave: currentConfigKey,
+      })
+      setShowSaveModal(false)
+      setAddToCartSuccess(false)
+      setAddToCartError(null)
+    } catch (err: unknown) {
+      let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
+      if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
+        msg = PC_BUILDER_ERROR_MESSAGES[err.code]
+      } else if (err instanceof ApiError && err.description) {
+        msg = err.description
+      } else if (err instanceof Error) {
+        msg = err.message
+      }
+      setSaveError(msg)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // Thêm cấu hình đã lưu vào giỏ hàng
+  const handleAddToCart = async () => {
+    if (!savedBuildInfo || isAddingToCart) return
+
+    setIsAddingToCart(true)
+    setAddToCartError(null)
+    setAddToCartSuccess(false)
+
+    try {
+      await addFromPCBuild(savedBuildInfo.build.id)
+      setAddToCartSuccess(true)
+    } catch (err: unknown) {
+      let msg = 'Không thể thêm cấu hình vào giỏ hàng. Vui lòng thử lại.'
+      if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
+        msg = PC_BUILDER_ERROR_MESSAGES[err.code]
+      } else if (err instanceof Error) {
+        msg = err.message
+      }
+      setAddToCartError(msg)
+    } finally {
+      setIsAddingToCart(false)
+    }
+  }
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-6 space-y-6 sticky top-24">
@@ -318,18 +525,83 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
 
       {/* Action Buttons Section */}
       <div className="space-y-3 pt-3 border-t border-slate-100">
-        {/* Save Build CTA (Informational for this phase) */}
+        {/* Saved Build Banner & Add to Cart Action */}
+        {isCurrentBuildSaved && (
+          <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 space-y-3">
+            <div className="flex items-start gap-2.5">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-emerald-900 truncate">
+                  Đã lưu: {savedBuildInfo.build.name}
+                </p>
+                <p className="text-[10px] text-emerald-700">
+                  Mã cấu hình: <span className="font-mono">{savedBuildInfo.build.id}</span>
+                </p>
+              </div>
+            </div>
+
+            {addToCartSuccess ? (
+              <div className="p-2.5 rounded-xl bg-white border border-emerald-300 text-xs text-emerald-800 space-y-1 text-center">
+                <p className="font-bold flex items-center justify-center gap-1.5">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>Đã thêm cấu hình vào giỏ hàng thành công!</span>
+                </p>
+                <Link
+                  to="/cart"
+                  className="inline-flex items-center gap-1 font-bold text-red-600 hover:text-red-700 underline text-xs"
+                >
+                  <span>Xem giỏ hàng</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={isAddingToCart || !previewResult?.canPurchaseAll}
+                onClick={handleAddToCart}
+                className="w-full py-2.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs transition-colors flex items-center justify-center gap-2 shadow-2xs"
+              >
+                {isAddingToCart ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang thêm vào giỏ hàng...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShoppingBag className="w-4 h-4" />
+                    <span>Thêm cấu hình vào giỏ hàng</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {addToCartError && (
+              <p className="text-[11px] font-semibold text-rose-600 bg-rose-50 p-2 rounded-lg border border-rose-200">
+                {addToCartError}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Nút Lưu Cấu Hình */}
         <div className="space-y-1 text-center">
           <button
             type="button"
-            disabled
-            className="w-full py-3 px-4 rounded-2xl bg-slate-100 text-slate-400 font-bold text-xs sm:text-sm cursor-not-allowed flex items-center justify-center gap-2"
+            disabled={!hasItems || isLoading || isSaving}
+            onClick={handleOpenSaveModal}
+            className="w-full py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm transition-colors flex items-center justify-center gap-2 shadow-2xs"
           >
             <Bookmark className="w-4 h-4" />
-            <span>Lưu Cấu Hình (Sắp ra mắt)</span>
+            <span>
+              {isCurrentBuildSaved
+                ? 'Lưu lại thành bản mới'
+                : 'Lưu Cấu Hình Vào Tài Khoản'}
+            </span>
           </button>
           <p className="text-[10px] text-slate-400">
-            Chức năng lưu cấu hình sẽ yêu cầu đăng nhập và được cập nhật ở phase tiếp theo.
+            {authStatus === 'anonymous'
+              ? 'Khách vãng lai sẽ được bảo toàn cấu hình và chuyển hướng đăng nhập để lưu.'
+              : 'Lưu cấu hình giúp bạn xem lại sau. Không tự thêm giỏ hay tạo đơn hàng.'}
           </p>
         </div>
 
@@ -374,6 +646,151 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
           </div>
         )}
       </div>
+
+      {/* Save Build Modal */}
+      {showSaveModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+            {/* Modal Header */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Bookmark className="w-5 h-5 text-red-500" />
+                <h3 className="font-bold text-sm sm:text-base">Lưu cấu hình PC</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSaveModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                aria-label="Đóng form lưu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            {user && user.role !== UserRole.Customer ? (
+              <div className="p-6 space-y-4">
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm">
+                  <p className="font-bold flex items-center gap-1.5 mb-1">
+                    <ShieldAlert className="w-4 h-4 text-amber-600" />
+                    <span>Không hỗ trợ tài khoản {user.role === UserRole.Admin ? 'Quản trị viên' : 'Nhân viên'}</span>
+                  </p>
+                  <p>
+                    Theo quy định nghiệp vụ, chỉ tài khoản Khách hàng (Customer) mới có thể lưu và quản lý cấu hình PC cá nhân.
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowSaveModal(false)}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Đóng
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleSaveSubmit} className="p-6 space-y-4">
+                {saveError && (
+                  <div
+                    role="alert"
+                    className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-start gap-2"
+                  >
+                    <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                    <span>{saveError}</span>
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <label htmlFor="pc-build-name" className="text-xs font-bold text-slate-700 block">
+                    Tên cấu hình <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="pc-build-name"
+                    type="text"
+                    maxLength={200}
+                    value={buildName}
+                    onChange={(e) => setBuildName(e.target.value)}
+                    placeholder="VD: Dàn máy Gaming RTX 4070..."
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                  {saveValidationErrors.name && (
+                    <p className="text-[11px] font-semibold text-rose-600">
+                      {saveValidationErrors.name}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-slate-400 text-right">
+                    {buildName.length}/200 ký tự
+                  </p>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label htmlFor="pc-build-desc" className="text-xs font-bold text-slate-700 block">
+                    Mô tả (tùy chọn)
+                  </label>
+                  <textarea
+                    id="pc-build-desc"
+                    rows={3}
+                    maxLength={1000}
+                    value={buildDescription}
+                    onChange={(e) => setBuildDescription(e.target.value)}
+                    placeholder="Ghi chú về nhu cầu nâng cấp, mục đích sử dụng..."
+                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                  />
+                  {saveValidationErrors.description && (
+                    <p className="text-[11px] font-semibold text-rose-600">
+                      {saveValidationErrors.description}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-slate-400 text-right">
+                    {buildDescription.length}/1000 ký tự
+                  </p>
+                </div>
+
+                <div className="text-[11px] text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <p>
+                    Lưu {itemCount} linh kiện đã chọn với tổng tạm tính:{' '}
+                    <span className="font-bold text-slate-900">
+                      {previewResult ? formatVnd(previewResult.totalPrice) : '---'}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSaveModal(false)}
+                    className="px-4 py-2 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-semibold transition-colors"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSaving}
+                    className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang lưu...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Bookmark className="w-3.5 h-3.5" />
+                        <span>Lưu cấu hình</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

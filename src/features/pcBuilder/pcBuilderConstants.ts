@@ -79,7 +79,20 @@ export const PC_BUILDER_ERROR_MESSAGES: Record<string, string> = {
   'PCBuild.MultipleSingleChoiceComponents':
     'Chỉ được chọn 1 sản phẩm cho linh kiện đơn lẻ (CPU, Mainboard, GPU, Nguồn, Case, Tản nhiệt).',
   'PCBuild.InvalidSingleChoiceQuantity': 'Số lượng của linh kiện đơn lẻ phải bằng 1.',
+  'PCBuild.Forbidden': 'Chỉ tài khoản khách hàng (Customer) mới có thể lưu và quản lý cấu hình PC.',
+  'PCBuild.NotFound': 'Không tìm thấy cấu hình PC đã lưu.',
+  'PCBuild.EmptyBuild': 'Cấu hình PC không có linh kiện nào.',
 }
+
+/**
+ * Key dùng lưu cấu hình tạm vào sessionStorage khi khách vãng lai bấm Lưu để đăng nhập
+ */
+export const PC_BUILDER_GUEST_STORAGE_KEY = 'riutek_pc_builder_guest_items_v1'
+
+/**
+ * Thời gian sống của dữ liệu cấu hình lưu tạm (1 giờ)
+ */
+export const PC_BUILDER_GUEST_STORAGE_TTL_MS = 60 * 60 * 1000
 
 /**
  * Lọc ra chính xác các field kỹ thuật áp dụng cho slot hiện tại để đảm bảo không gửi field thừa lên Backend

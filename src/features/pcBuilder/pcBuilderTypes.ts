@@ -105,3 +105,63 @@ export interface PCBuilderTechnicalFilterState {
 }
 
 export const EMPTY_TECHNICAL_FILTERS: Readonly<PCBuilderTechnicalFilterState> = Object.freeze({})
+
+/**
+ * Trạng thái cấu hình PC theo Backend PCBuildStatus
+ */
+export enum PCBuildStatus {
+  Draft = 1,
+  Saved = 2,
+  Ordered = 3,
+}
+
+/**
+ * Request payload gửi lên POST /api/v1/pc-builds để lưu cấu hình
+ */
+export interface CreatePCBuildRequest {
+  name: string
+  description?: string | null
+  items: PCBuildItemInput[]
+}
+
+/**
+ * Chi tiết một linh kiện trong cấu hình đã lưu (MyPCBuildItemDto)
+ */
+export interface MyPCBuildItem {
+  id: string
+  productId: string
+  productName: string
+  productSlug: string
+  productSku: string
+  productImageUrl: string
+  componentType: ComponentType
+  quantity: number
+  unitPrice: number
+  lineTotal: number
+  currentPrice: number
+  stockQuantity: number
+  isActive: boolean
+  canPurchase: boolean
+  specifications: ComponentSpecification | null
+}
+
+/**
+ * DTO cấu hình đã lưu do Backend trả về (MyPCBuildDto)
+ */
+export interface MyPCBuild {
+  id: string
+  name: string
+  description: string | null
+  totalPrice: number
+  estimatedWattage: number
+  recommendedPsuWattage: number
+  isCompatible: boolean
+  isCompleteSystem: boolean
+  missingComponents: string[]
+  issues: CompatibilityIssue[]
+  canPurchaseAll: boolean
+  status: PCBuildStatus
+  items: MyPCBuildItem[]
+  createdAt: string
+  updatedAt: string | null
+}

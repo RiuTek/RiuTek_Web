@@ -114,6 +114,7 @@ export const PCBuilderPage: React.FC = () => {
           {/* Right Column: Compatibility Summary */}
           <div className="lg:col-span-5 xl:col-span-4">
             <PCBuilderSummary
+              selectedItems={selectedItems}
               previewResult={previewResult}
               isLoading={isPreviewLoading}
               error={previewError}

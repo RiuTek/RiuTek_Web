@@ -9,6 +9,7 @@ import { ApiError } from '../../lib/api'
 import { useAuth } from '../auth/AuthContext'
 import {
   addCartItem,
+  addPCBuildToCart as apiAddPCBuildToCart,
   clearCart as apiClearCart,
   getCart,
   removeCartItem,
@@ -216,6 +217,43 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
   )
 
   /**
+   * Thêm toàn bộ cấu hình PC đã lưu vào giỏ hàng
+   */
+  const addFromPCBuild = useCallback(
+    async (pcBuildId: string): Promise<CartDto> => {
+      if (authStatus !== 'authenticated') {
+        throw new Error('Vui lòng đăng nhập để thêm cấu hình PC vào giỏ hàng.')
+      }
+
+      setIsMutating(true)
+      try {
+        const updatedCart = await withAuthRetry((token) =>
+          apiAddPCBuildToCart(pcBuildId, token)
+        )
+        if (isMountedRef.current) {
+          setCart(updatedCart)
+          setError(null)
+        }
+        return updatedCart
+      } catch (err) {
+        if (isCartConflict(err)) {
+          return await recoverFromConflict(err)
+        }
+        const friendlyMessage = mapCartError(err)
+        if (isMountedRef.current) {
+          setError(friendlyMessage)
+        }
+        throw new Error(friendlyMessage, { cause: err })
+      } finally {
+        if (isMountedRef.current) {
+          setIsMutating(false)
+        }
+      }
+    },
+    [authStatus, withAuthRetry, recoverFromConflict]
+  )
+
+  /**
    * Đặt số lượng tuyệt đối cho một sản phẩm trong giỏ hàng
    */
   const setQuantity = useCallback(
@@ -320,6 +358,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       itemCount,
       loadCart,
       addItem,
+      addFromPCBuild,
       setQuantity,
       removeItem,
       clearCart,
@@ -333,6 +372,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       itemCount,
       loadCart,
       addItem,
+      addFromPCBuild,
       setQuantity,
       removeItem,
       clearCart,

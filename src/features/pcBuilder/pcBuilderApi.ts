@@ -1,5 +1,10 @@
 import { apiClient } from '../../lib/api'
-import type { PCBuildItemInput, PCBuildPreviewResult } from './pcBuilderTypes'
+import type {
+  CreatePCBuildRequest,
+  MyPCBuild,
+  PCBuildItemInput,
+  PCBuildPreviewResult,
+} from './pcBuilderTypes'
 
 /**
  * Gửi cấu hình linh kiện lên Backend để tính toán và kiểm tra tương thích.
@@ -16,4 +21,19 @@ export function previewPCBuild(
       signal,
     }
   )
+}
+
+/**
+ * Lưu cấu hình PC hiện tại vào tài khoản khách hàng đã đăng nhập.
+ * Yêu cầu quyền Customer (Bearer token).
+ */
+export function createPCBuild(
+  request: CreatePCBuildRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<MyPCBuild> {
+  return apiClient.post<MyPCBuild>('/pc-builds', request, {
+    token,
+    signal,
+  })
 }

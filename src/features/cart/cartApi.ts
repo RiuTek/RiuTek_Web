@@ -39,6 +39,22 @@ export function setCartItemQuantity(
 }
 
 /**
+ * Thêm toàn bộ linh kiện từ cấu hình PC đã lưu vào giỏ hàng.
+ * Backend trả về 200 CartDto.
+ */
+export function addPCBuildToCart(
+  pcBuildId: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<CartDto> {
+  return apiClient.post<CartDto>(
+    `/carts/from-pc-build/${encodeURIComponent(pcBuildId)}`,
+    undefined,
+    { token, signal }
+  )
+}
+
+/**
  * Xóa một sản phẩm khỏi giỏ hàng.
  * Backend trả về 204 No Content.
  */

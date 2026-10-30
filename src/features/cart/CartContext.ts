@@ -9,6 +9,7 @@ export interface CartContextValue {
   itemCount: number
   loadCart: () => Promise<void>
   addItem: (productId: string, quantity: number) => Promise<CartDto>
+  addFromPCBuild: (pcBuildId: string) => Promise<CartDto>
   setQuantity: (productId: string, quantity: number) => Promise<CartDto>
   removeItem: (productId: string) => Promise<void>
   clearCart: () => Promise<void>

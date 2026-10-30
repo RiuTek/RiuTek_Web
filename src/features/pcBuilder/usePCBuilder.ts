@@ -8,6 +8,8 @@ import {
   MAX_MULTI_CHOICE_QUANTITY,
   MIN_QUANTITY,
   PC_BUILDER_ERROR_MESSAGES,
+  PC_BUILDER_GUEST_STORAGE_KEY,
+  PC_BUILDER_GUEST_STORAGE_TTL_MS,
 } from './pcBuilderConstants'
 import type {
   PCBuildItemInput,
@@ -25,8 +27,67 @@ interface ErrorSnapshot {
   error: string
 }
 
+interface StoredGuestBuild {
+  savedAt: number
+  items: Array<{
+    product: ProductSummary
+    quantity: number
+  }>
+}
+
+function loadStoredGuestItems(): SelectedPCBuildItem[] {
+  if (typeof window === 'undefined' || !window.sessionStorage) return []
+  try {
+    const raw = sessionStorage.getItem(PC_BUILDER_GUEST_STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as StoredGuestBuild
+    if (
+      !parsed ||
+      typeof parsed.savedAt !== 'number' ||
+      !Array.isArray(parsed.items) ||
+      Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS
+    ) {
+      sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+      return []
+    }
+
+    // Validate cấu trúc từng item
+    const validItems: SelectedPCBuildItem[] = []
+    for (const entry of parsed.items) {
+      if (
+        entry &&
+        entry.product &&
+        typeof entry.product.id === 'string' &&
+        typeof entry.product.name === 'string' &&
+        typeof entry.product.componentType === 'number' &&
+        typeof entry.quantity === 'number' &&
+        entry.quantity >= 1 &&
+        entry.quantity <= 20
+      ) {
+        validItems.push({
+          product: entry.product,
+          quantity: entry.quantity,
+        })
+      }
+    }
+
+    // Đã restore thành công -> xóa dữ liệu tạm khỏi sessionStorage
+    sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+    return validItems
+  } catch {
+    try {
+      sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+    } catch {
+      // Bỏ qua lỗi sessionStorage nếu bị chặn
+    }
+    return []
+  }
+}
+
 export function usePCBuilder() {
-  const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>([])
+  const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>(() =>
+    loadStoredGuestItems()
+  )
   const [activeSlot, setActiveSlot] = useState<ComponentType | null>(null)
   const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot | null>(null)
   const [errorSnapshot, setErrorSnapshot] = useState<ErrorSnapshot | null>(null)
