@@ -25,8 +25,11 @@ import { formatVnd } from '../../products/productConstants'
 import { createPCBuild } from '../pcBuilderApi'
 import {
   PC_BUILDER_ERROR_MESSAGES,
-  PC_BUILDER_GUEST_STORAGE_KEY,
 } from '../pcBuilderConstants'
+import {
+  recordSaveIntent,
+  saveDraft,
+} from '../pcBuilderDraftStorage'
 import type {
   MyPCBuild,
   PCBuildItemInput,
@@ -149,24 +152,19 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     if (!hasItems) return
     setGuestSaveError(null)
 
-    // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu tối thiểu { savedAt, items: [{ productId, quantity }] }
+    // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu guest draft và ghi nhận save intent
     if (authStatus === 'anonymous') {
       try {
         if (typeof window === 'undefined' || !window.sessionStorage) {
           throw new Error('Trình duyệt không hỗ trợ sessionStorage.')
         }
 
-        const guestData = {
-          savedAt: Date.now(),
-          items: selectedItems.slice(0, 30).map((item) => ({
-            productId: item.product.id,
-            quantity: item.quantity,
-          })),
+        const saved = saveDraft('guest', selectedItems)
+        const intentRecorded = recordSaveIntent()
+        if (!saved || !intentRecorded) {
+          throw new Error('Không thể ghi bản nháp tạm vào sessionStorage.')
         }
-        sessionStorage.setItem(
-          PC_BUILDER_GUEST_STORAGE_KEY,
-          JSON.stringify(guestData)
-        )
+
         navigate('/login', { state: { from: '/pc-builder' } })
         return
       } catch {

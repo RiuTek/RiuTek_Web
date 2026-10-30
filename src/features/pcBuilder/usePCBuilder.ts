@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ApiError } from '../../lib/api'
+import { useAuth } from '../auth/AuthContext'
 import type { ProductSummary, ComponentType } from '../products/productTypes'
 import { previewPCBuild } from './pcBuilderApi'
 import {
@@ -8,9 +9,14 @@ import {
   MAX_MULTI_CHOICE_QUANTITY,
   MIN_QUANTITY,
   PC_BUILDER_ERROR_MESSAGES,
-  PC_BUILDER_GUEST_STORAGE_KEY,
-  PC_BUILDER_GUEST_STORAGE_TTL_MS,
 } from './pcBuilderConstants'
+import {
+  consumeSaveIntent,
+  loadDraft,
+  removeDraft,
+  saveDraft,
+  type PCBuilderDraftPayload,
+} from './pcBuilderDraftStorage'
 import type {
   PCBuildItemInput,
   PCBuildPreviewResult,
@@ -28,18 +34,53 @@ interface ErrorSnapshot {
   error: string
 }
 
-interface StoredGuestBuild {
-  savedAt: number
-  items: Array<{
-    productId: string
-    quantity: number
-  }>
+function computeSelectedProduct(
+  prev: SelectedPCBuildItem[],
+  product: ProductSummary
+): SelectedPCBuildItem[] {
+  const isSingle = isSingleChoiceComponent(product.componentType)
+
+  if (isSingle) {
+    const existingSingle = prev.find(
+      (item) => item.product.componentType === product.componentType
+    )
+    if (existingSingle && existingSingle.product.id === product.id) {
+      return prev
+    }
+
+    const filtered = prev.filter(
+      (item) => item.product.componentType !== product.componentType
+    )
+    if (filtered.length >= MAX_BUILD_ITEMS) return prev
+    return [...filtered, { product, quantity: 1 }]
+  }
+
+  // Multi-choice: Tăng quantity hoặc thêm mới
+  const existingIndex = prev.findIndex((item) => item.product.id === product.id)
+  if (existingIndex >= 0) {
+    const currentQty = prev[existingIndex].quantity
+    if (currentQty >= MAX_MULTI_CHOICE_QUANTITY) {
+      return prev
+    }
+    return prev.map((item, idx) => {
+      if (idx !== existingIndex) return item
+      return {
+        ...item,
+        quantity: Math.min(MAX_MULTI_CHOICE_QUANTITY, item.quantity + 1),
+      }
+    })
+  }
+
+  if (prev.length >= MAX_BUILD_ITEMS) {
+    return prev
+  }
+
+  return [...prev, { product, quantity: 1 }]
 }
 
-const UUID_REGEX =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
 export function usePCBuilder() {
+  const { status: authStatus, user } = useAuth()
+
   const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>([])
   const [activeSlot, setActiveSlot] = useState<ComponentType | null>(null)
   const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot | null>(null)
@@ -47,113 +88,116 @@ export function usePCBuilder() {
   const [completedKey, setCompletedKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
-  // Trạng thái khôi phục cấu hình từ guest session
-  const [isRestoringGuestBuild, setIsRestoringGuestBuild] = useState(false)
-  const [guestRestoreNotice, setGuestRestoreNotice] = useState<string | null>(null)
-  const [guestRestoreError, setGuestRestoreError] = useState<string | null>(null)
+  // Trạng thái khôi phục bản nháp cấu hình
+  const [isRestoringDraft, setIsRestoringDraft] = useState(false)
+  const [draftRestoreNotice, setDraftRestoreNotice] = useState<string | null>(null)
+  const [draftRestoreError, setDraftRestoreError] = useState<string | null>(null)
+  const [storageWarning, setStorageWarning] = useState<string | null>(null)
 
-  // Request tracking guards
+  // Tracking refs
+  const selectedItemsRef = useRef<SelectedPCBuildItem[]>(selectedItems)
+  useEffect(() => {
+    selectedItemsRef.current = selectedItems
+  }, [selectedItems])
+
   const activeSequenceRef = useRef<number>(0)
   const latestConfigKeyRef = useRef<string>('')
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  const isMountedRef = useRef(true)
+  const isRestoreResolvedRef = useRef(false)
+  const restoreSequenceRef = useRef(0)
   const hasAttemptedRestoreRef = useRef(false)
 
-  // Khôi phục cấu hình khách vãng lai sau đăng nhập và xác thực lại dữ liệu từ Backend
-  const restoreGuestBuild = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.sessionStorage) return
+  // Lifecycle mount check
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
-    let raw: string | null
-    try {
-      raw = sessionStorage.getItem(PC_BUILDER_GUEST_STORAGE_KEY)
-    } catch {
+  // Khôi phục bản nháp từ sessionStorage và xác thực lại dữ liệu từ Backend
+  const performRestore = useCallback(async () => {
+    if (authStatus === 'checking') return
+    if (authStatus === 'unavailable') {
+      isRestoreResolvedRef.current = true
       return
     }
 
-    if (!raw) return
+    const currentSeq = ++restoreSequenceRef.current
 
-    let parsed: StoredGuestBuild
-    try {
-      parsed = JSON.parse(raw) as StoredGuestBuild
-    } catch {
-      // Payload hỏng -> xóa an toàn
-      try {
-        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-      } catch {
-        // Bỏ qua lỗi storage
+    let draftToRestore: PCBuilderDraftPayload | null = null
+    let transferGuestToUser = false
+    let noticeMessage: string | null = null
+
+    if (authStatus === 'authenticated' && user?.id) {
+      // 1. Kiểm tra xem tài khoản đã có sẵn bản nháp hợp lệ hay chưa
+      const userDraftResult = loadDraft(user.id)
+      if (userDraftResult.notice) {
+        noticeMessage = userDraftResult.notice
       }
-      setGuestRestoreNotice('Dữ liệu cấu hình tạm bị hỏng và đã được làm mới.')
-      return
-    }
 
-    if (
-      !parsed ||
-      typeof parsed.savedAt !== 'number' ||
-      !Array.isArray(parsed.items) ||
-      Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS
-    ) {
-      // Hết hạn hoặc cấu trúc sai -> xóa
-      try {
-        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-      } catch {
-        // Bỏ qua lỗi storage
-      }
-      if (parsed && Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS) {
-        setGuestRestoreNotice('Cấu hình lưu tạm đã quá hạn (1 giờ) và đã được xóa.')
-      }
-      return
-    }
+      // Kiểm tra intent chuyển giao từ phiên khách
+      const hasSaveIntent = consumeSaveIntent()
 
-    // Validate chặt chẽ từng item (chỉ nhận UUID hợp lệ, quantity 1..20, tối đa 30 dòng, loại bỏ duplicate)
-    const validInputs: PCBuildItemInput[] = []
-    const seenIds = new Set<string>()
-
-    for (const item of parsed.items.slice(0, MAX_BUILD_ITEMS)) {
-      if (
-        item &&
-        typeof item.productId === 'string' &&
-        UUID_REGEX.test(item.productId.trim()) &&
-        typeof item.quantity === 'number' &&
-        Number.isInteger(item.quantity) &&
-        item.quantity >= 1 &&
-        item.quantity <= MAX_MULTI_CHOICE_QUANTITY
-      ) {
-        const cleanId = item.productId.trim().toLowerCase()
-        if (!seenIds.has(cleanId)) {
-          seenIds.add(cleanId)
-          validInputs.push({
-            productId: cleanId,
-            quantity: item.quantity,
-          })
+      if (userDraftResult.draft) {
+        draftToRestore = userDraftResult.draft
+        if (hasSaveIntent) {
+          // Tài khoản đã có sẵn bản nháp: ưu tiên tài khoản, thông báo không ghi đè âm thầm
+          setDraftRestoreNotice(
+            'Đã khôi phục bản nháp của tài khoản. Cấu hình tạm từ phiên khách chưa được áp dụng vì tài khoản đã có sẵn bản nháp.'
+          )
+        }
+      } else if (hasSaveIntent) {
+        // Tài khoản chưa có bản nháp và có intent lưu từ phiên khách: đọc guest draft
+        const guestDraftResult = loadDraft('guest')
+        if (guestDraftResult.draft) {
+          draftToRestore = guestDraftResult.draft
+          transferGuestToUser = true
         }
       }
+    } else if (authStatus === 'anonymous') {
+      const guestDraftResult = loadDraft('guest')
+      if (guestDraftResult.notice) {
+        noticeMessage = guestDraftResult.notice
+      }
+      draftToRestore = guestDraftResult.draft
     }
 
-    if (validInputs.length === 0) {
-      try {
-        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-      } catch {
-        // Bỏ qua lỗi storage
+    if (!draftToRestore || draftToRestore.items.length === 0) {
+      isRestoreResolvedRef.current = true
+      if (noticeMessage) {
+        setDraftRestoreNotice(noticeMessage)
       }
-      setGuestRestoreNotice('Cấu hình lưu tạm không chứa linh kiện hợp lệ.')
       return
     }
 
-    setIsRestoringGuestBuild(true)
-    setGuestRestoreError(null)
+    setIsRestoringDraft(true)
+    setDraftRestoreError(null)
 
     try {
-      // Xác thực lại thông tin sản phẩm và giá/kho từ Backend qua preview endpoint
-      const previewRes = await previewPCBuild(validInputs)
+      const inputs: PCBuildItemInput[] = draftToRestore.items.map((i) => ({
+        productId: i.productId,
+        quantity: i.quantity,
+      }))
 
-      // Chuyển đổi các item trả về thành SelectedPCBuildItem
+      // Gọi public preview để lấy thông tin giá, kho và tương thích mới nhất
+      const previewRes = await previewPCBuild(inputs)
+
+      // Guard: Nếu unmount hoặc đã có restore/action mới hơn thì bỏ qua
+      if (!isMountedRef.current || restoreSequenceRef.current !== currentSeq) {
+        return
+      }
+
       const restoredItems: SelectedPCBuildItem[] = []
       const returnedMap = new Map<string, (typeof previewRes.items)[0]>()
       for (const item of previewRes.items) {
         returnedMap.set(item.productId.toLowerCase(), item)
       }
 
-      for (const input of validInputs) {
-        const found = returnedMap.get(input.productId)
+      for (const input of inputs) {
+        const found = returnedMap.get(input.productId.toLowerCase())
         if (found) {
           const productItem: PCBuilderProductItem = {
             id: found.productId,
@@ -177,9 +221,9 @@ export function usePCBuilder() {
       }
 
       if (restoredItems.length > 0) {
+        selectedItemsRef.current = restoredItems
         setSelectedItems(restoredItems)
 
-        // Tính toán và tạo ngay configKey tương ứng để snapshot khớp lập tức
         const restoredKey = restoredItems
           .map((item) => `${item.product.id}:${item.quantity}`)
           .sort()
@@ -188,46 +232,82 @@ export function usePCBuilder() {
         setPreviewSnapshot({ configKey: restoredKey, result: previewRes })
         setCompletedKey(restoredKey)
 
-        if (restoredItems.length < validInputs.length) {
-          setGuestRestoreNotice(
-            `Đã khôi phục ${restoredItems.length}/${validInputs.length} linh kiện. Một số linh kiện trước đó không còn tồn tại trong hệ thống.`
-          )
+        if (transferGuestToUser && user?.id) {
+          // Chuyển giao guest draft sang user draft với updatedAt gốc
+          saveDraft(user.id, restoredItems, draftToRestore.updatedAt)
+          removeDraft('guest')
+          setDraftRestoreNotice('Đã khôi phục cấu hình từ phiên khách vào tài khoản của bạn.')
         } else {
-          setGuestRestoreNotice('Đã khôi phục cấu hình từ phiên trước thành công!')
+          // Giữ draft với updatedAt gốc trong storage
+          const currentOwner =
+            authStatus === 'authenticated' && user?.id ? user.id : 'guest'
+          saveDraft(currentOwner, restoredItems, draftToRestore.updatedAt)
+
+          if (restoredItems.length < inputs.length) {
+            setDraftRestoreNotice(
+              `Đã khôi phục ${restoredItems.length}/${inputs.length} linh kiện. Một số linh kiện trước đó không còn tồn tại trong hệ thống.`
+            )
+          } else {
+            setDraftRestoreNotice('Đã khôi phục bản nháp cấu hình thành công!')
+          }
         }
       } else {
-        setGuestRestoreNotice(
+        setDraftRestoreNotice(
           'Không thể khôi phục các linh kiện do đã bị ngừng kinh doanh hoặc không còn tồn tại.'
         )
       }
-
-      // Xóa sessionStorage sau khi khôi phục thành công
-      try {
-        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-      } catch {
-        // Bỏ qua
-      }
     } catch (err: unknown) {
-      // Khi gặp lỗi mạng / API: GIỮ NGUYÊN payload trong sessionStorage để người dùng có thể thử lại
-      let msg = 'Không thể xác thực lại cấu hình lưu tạm với máy chủ. Vui lòng thử lại.'
+      if (!isMountedRef.current || restoreSequenceRef.current !== currentSeq) {
+        return
+      }
+
+      // Giữ nguyên draft trong storage để cho phép thử lại
+      let msg = 'Không thể xác thực lại bản nháp cấu hình với máy chủ. Vui lòng thử lại.'
       if (err instanceof ApiError && err.description) {
         msg = err.description
       } else if (err instanceof Error) {
         msg = err.message
       }
-      setGuestRestoreError(msg)
+      setDraftRestoreError(msg)
     } finally {
-      setIsRestoringGuestBuild(false)
+      if (isMountedRef.current && restoreSequenceRef.current === currentSeq) {
+        setIsRestoringDraft(false)
+        isRestoreResolvedRef.current = true
+      }
     }
-  }, [])
+  }, [authStatus, user])
 
-  // Chạy restore khi hook mount lần đầu
+  // Khôi phục bản nháp khi auth status ổn định
   useEffect(() => {
+    if (authStatus === 'checking') return
     if (!hasAttemptedRestoreRef.current) {
       hasAttemptedRestoreRef.current = true
-      restoreGuestBuild()
+      performRestore()
     }
-  }, [restoreGuestBuild])
+  }, [authStatus, performRestore])
+
+  // Tự động lưu bản nháp khi có thao tác chỉnh sửa selection thực sự
+  const persistSelection = useCallback(
+    (newItems: SelectedPCBuildItem[]) => {
+      if (!isRestoreResolvedRef.current) return
+      if (authStatus === 'checking' || authStatus === 'unavailable') return
+
+      const owner = authStatus === 'authenticated' && user?.id ? user.id : 'guest'
+
+      if (newItems.length === 0) {
+        removeDraft(owner)
+        return
+      }
+
+      const ok = saveDraft(owner, newItems)
+      if (!ok) {
+        setStorageWarning(
+          'Trình duyệt đang chặn bộ nhớ tạm (sessionStorage). Cấu hình sẽ không được giữ lại khi tải lại trang.'
+        )
+      }
+    },
+    [authStatus, user]
+  )
 
   // Tập hợp các ID sản phẩm đã chọn
   const selectedProductIds = useMemo(() => {
@@ -264,89 +344,84 @@ export function usePCBuilder() {
       (!effectivePreviewResult && !effectivePreviewError))
 
   // Chọn hoặc thay thế sản phẩm
-  const selectProduct = useCallback((product: ProductSummary) => {
-    if (!product.isActive || product.stockQuantity <= 0) {
-      return
-    }
+  const selectProduct = useCallback(
+    (product: ProductSummary) => {
+      if (isRestoringDraft) return
+      if (!product.isActive || product.stockQuantity <= 0) return
 
-    setSelectedItems((prev) => {
-      const isSingle = isSingleChoiceComponent(product.componentType)
-
-      if (isSingle) {
-        // Kiểm tra xem có đúng sản phẩm này đang được chọn hay không
-        const existingSingle = prev.find(
-          (item) => item.product.componentType === product.componentType
-        )
-        if (existingSingle && existingSingle.product.id === product.id) {
-          return prev // Không làm gì nếu đã chọn đúng sản phẩm này
-        }
-
-        // Thay thế sản phẩm cùng ComponentType nếu là single-choice
-        const filtered = prev.filter(
-          (item) => item.product.componentType !== product.componentType
-        )
-        if (filtered.length >= MAX_BUILD_ITEMS) return prev
-        return [...filtered, { product, quantity: 1 }]
+      const current = selectedItemsRef.current
+      const next = computeSelectedProduct(current, product)
+      if (next !== current) {
+        selectedItemsRef.current = next
+        setSelectedItems(next)
+        persistSelection(next)
       }
-
-      // Multi-choice: Nếu đã có product.id trong danh sách thì tăng quantity (tối đa 20)
-      const existingIndex = prev.findIndex((item) => item.product.id === product.id)
-      if (existingIndex >= 0) {
-        const currentQty = prev[existingIndex].quantity
-        if (currentQty >= MAX_MULTI_CHOICE_QUANTITY) {
-          return prev // Đã đạt tối đa 20
-        }
-        return prev.map((item, idx) => {
-          if (idx !== existingIndex) return item
-          return {
-            ...item,
-            quantity: Math.min(MAX_MULTI_CHOICE_QUANTITY, item.quantity + 1),
-          }
-        })
-      }
-
-      // Nếu chưa có, thêm mới (nếu chưa vượt quá 30 items)
-      if (prev.length >= MAX_BUILD_ITEMS) {
-        return prev
-      }
-
-      return [...prev, { product, quantity: 1 }]
-    })
-  }, [])
+    },
+    [isRestoringDraft, persistSelection]
+  )
 
   // Thay đổi số lượng sản phẩm (chỉ hỗ trợ multi-choice)
-  const updateItemQuantity = useCallback((productId: string, qty: number) => {
-    setSelectedItems((prev) => {
-      return prev.map((item) => {
+  const updateItemQuantity = useCallback(
+    (productId: string, qty: number) => {
+      if (isRestoringDraft) return
+      const current = selectedItemsRef.current
+      let changed = false
+      const next = current.map((item) => {
         if (item.product.id !== productId) return item
         if (isSingleChoiceComponent(item.product.componentType)) {
+          if (item.quantity === 1) return item
+          changed = true
           return { ...item, quantity: 1 }
         }
         const clampedQty = Math.max(
           MIN_QUANTITY,
           Math.min(MAX_MULTI_CHOICE_QUANTITY, Math.floor(qty) || 1)
         )
+        if (clampedQty === item.quantity) return item
+        changed = true
         return { ...item, quantity: clampedQty }
       })
-    })
-  }, [])
+
+      if (changed) {
+        selectedItemsRef.current = next
+        setSelectedItems(next)
+        persistSelection(next)
+      }
+    },
+    [isRestoringDraft, persistSelection]
+  )
 
   // Gỡ sản phẩm khỏi cấu hình
-  const removeItem = useCallback((productId: string) => {
-    setSelectedItems((prev) => prev.filter((item) => item.product.id !== productId))
-  }, [])
+  const removeItem = useCallback(
+    (productId: string) => {
+      if (isRestoringDraft) return
+      const current = selectedItemsRef.current
+      const next = current.filter((item) => item.product.id !== productId)
+      if (next.length !== current.length) {
+        selectedItemsRef.current = next
+        setSelectedItems(next)
+        persistSelection(next)
+      }
+    },
+    [isRestoringDraft, persistSelection]
+  )
 
   // Xóa toàn bộ cấu hình
   const clearBuild = useCallback(() => {
+    restoreSequenceRef.current++
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
     activeSequenceRef.current++
+    selectedItemsRef.current = []
     setSelectedItems([])
     setPreviewSnapshot(null)
     setErrorSnapshot(null)
     setCompletedKey(null)
-  }, [])
+
+    const owner = authStatus === 'authenticated' && user?.id ? user.id : 'guest'
+    removeDraft(owner)
+  }, [authStatus, user])
 
   // Retry preview thủ công
   const retryPreview = useCallback(() => {
@@ -354,6 +429,12 @@ export function usePCBuilder() {
     setErrorSnapshot(null)
     setRetryTrigger((prev) => prev + 1)
   }, [])
+
+  // Retry khôi phục bản nháp
+  const retryDraftRestore = useCallback(() => {
+    setDraftRestoreError(null)
+    performRestore()
+  }, [performRestore])
 
   // Debounced auto-preview khi selection thay đổi (400ms)
   useEffect(() => {
@@ -443,11 +524,20 @@ export function usePCBuilder() {
     removeItem,
     clearBuild,
     retryPreview,
-    isRestoringGuestBuild,
-    guestRestoreNotice,
-    guestRestoreError,
-    retryGuestRestore: restoreGuestBuild,
-    dismissGuestRestoreNotice: () => setGuestRestoreNotice(null),
-    dismissGuestRestoreError: () => setGuestRestoreError(null),
+    isRestoringDraft,
+    draftRestoreNotice,
+    draftRestoreError,
+    storageWarning,
+    retryDraftRestore,
+    dismissDraftRestoreNotice: () => setDraftRestoreNotice(null),
+    dismissDraftRestoreError: () => setDraftRestoreError(null),
+    dismissStorageWarning: () => setStorageWarning(null),
+    // Aliases cho backward compatibility
+    isRestoringGuestBuild: isRestoringDraft,
+    guestRestoreNotice: draftRestoreNotice,
+    guestRestoreError: draftRestoreError,
+    retryGuestRestore: retryDraftRestore,
+    dismissGuestRestoreNotice: () => setDraftRestoreNotice(null),
+    dismissGuestRestoreError: () => setDraftRestoreError(null),
   }
 }
