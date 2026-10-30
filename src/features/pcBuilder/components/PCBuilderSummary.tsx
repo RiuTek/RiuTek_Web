@@ -27,6 +27,8 @@ import {
   PC_BUILDER_ERROR_MESSAGES,
 } from '../pcBuilderConstants'
 import {
+  DRAFT_TTL_MS,
+  loadDraft,
   recordSaveIntent,
   saveDraft,
 } from '../pcBuilderDraftStorage'
@@ -46,6 +48,7 @@ interface PCBuilderSummaryProps {
   hasItems: boolean
   itemCount: number
   onClearAll: () => void
+  lastModifiedAt?: number | null
 }
 
 interface SavedBuildState {
@@ -63,6 +66,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   hasItems,
   itemCount,
   onClearAll,
+  lastModifiedAt,
 }) => {
   const { status: authStatus, user, getAccessToken } = useAuth()
   const { addFromPCBuild } = useCart()
@@ -159,8 +163,27 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
           throw new Error('Trình duyệt không hỗ trợ sessionStorage.')
         }
 
-        const saved = saveDraft('guest', selectedItems)
-        const intentRecorded = recordSaveIntent()
+        // Xác định timestamp chỉnh sửa cuối cùng của selection
+        const currentGuestDraft = loadDraft('guest')
+        let draftTimestamp: number
+
+        if (currentGuestDraft.draft) {
+          draftTimestamp = currentGuestDraft.draft.updatedAt
+        } else {
+          draftTimestamp = lastModifiedAt ?? Date.now()
+        }
+
+        const now = Date.now()
+        // Nếu draft đã quá hạn nhưng selection vẫn đang hiện: không âm thầm gia hạn bằng nút Lưu
+        if (now - draftTimestamp > DRAFT_TTL_MS) {
+          setGuestSaveError(
+            'Bản nháp lưu tạm đã quá hạn (1 giờ). Vui lòng điều chỉnh lại cấu hình hoặc đăng nhập để tiếp tục lưu cấu hình.'
+          )
+          return
+        }
+
+        const saved = saveDraft('guest', selectedItems, draftTimestamp)
+        const intentRecorded = recordSaveIntent(draftTimestamp)
         if (!saved || !intentRecorded) {
           throw new Error('Không thể ghi bản nháp tạm vào sessionStorage.')
         }

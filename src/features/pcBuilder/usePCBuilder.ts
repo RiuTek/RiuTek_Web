@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../auth/AuthContext'
+import { UserRole } from '../auth/authTypes'
 import type { ProductSummary, ComponentType } from '../products/productTypes'
 import { previewPCBuild } from './pcBuilderApi'
 import {
@@ -11,8 +12,9 @@ import {
   PC_BUILDER_ERROR_MESSAGES,
 } from './pcBuilderConstants'
 import {
-  consumeSaveIntent,
+  clearSaveIntent,
   loadDraft,
+  peekSaveIntent,
   removeDraft,
   saveDraft,
   type PCBuilderDraftPayload,
@@ -100,6 +102,8 @@ export function usePCBuilder() {
     selectedItemsRef.current = selectedItems
   }, [selectedItems])
 
+  const [lastModifiedAt, setLastModifiedAt] = useState<number | null>(null)
+
   const activeSequenceRef = useRef<number>(0)
   const latestConfigKeyRef = useRef<string>('')
   const abortControllerRef = useRef<AbortController | null>(null)
@@ -130,35 +134,60 @@ export function usePCBuilder() {
     let draftToRestore: PCBuilderDraftPayload | null = null
     let transferGuestToUser = false
     let noticeMessage: string | null = null
+    let deferredAccountNotice: string | null = null
 
     if (authStatus === 'authenticated' && user?.id) {
-      // 1. Kiểm tra xem tài khoản đã có sẵn bản nháp hợp lệ hay chưa
-      const userDraftResult = loadDraft(user.id)
-      if (userDraftResult.notice) {
-        noticeMessage = userDraftResult.notice
-      }
-
-      // Kiểm tra intent chuyển giao từ phiên khách
-      const hasSaveIntent = consumeSaveIntent()
-
-      if (userDraftResult.draft) {
-        draftToRestore = userDraftResult.draft
-        if (hasSaveIntent) {
-          // Tài khoản đã có sẵn bản nháp: ưu tiên tài khoản, thông báo không ghi đè âm thầm
-          setDraftRestoreNotice(
-            'Đã khôi phục bản nháp của tài khoản. Cấu hình tạm từ phiên khách chưa được áp dụng vì tài khoản đã có sẵn bản nháp.'
+      if (user.role === UserRole.Customer) {
+        // 1. Kiểm tra xem tài khoản đã có sẵn bản nháp hợp lệ hay chưa
+        const userDraftResult = loadDraft(user.id)
+        if (userDraftResult.storageUnavailable) {
+          setStorageWarning(
+            'Trình duyệt đang chặn bộ nhớ tạm (sessionStorage). Cấu hình sẽ không được giữ lại khi tải lại trang.'
           )
         }
-      } else if (hasSaveIntent) {
-        // Tài khoản chưa có bản nháp và có intent lưu từ phiên khách: đọc guest draft
-        const guestDraftResult = loadDraft('guest')
-        if (guestDraftResult.draft) {
-          draftToRestore = guestDraftResult.draft
-          transferGuestToUser = true
+        if (userDraftResult.notice) {
+          noticeMessage = userDraftResult.notice
+        }
+
+        // Kiểm tra intent chuyển giao từ phiên khách (KHÔNG xóa intent để cho phép retry)
+        const saveIntent = peekSaveIntent()
+
+        if (userDraftResult.draft) {
+          draftToRestore = userDraftResult.draft
+          if (saveIntent.valid) {
+            // Tài khoản đã có sẵn bản nháp: ưu tiên tài khoản, thông báo không ghi đè âm thầm
+            clearSaveIntent()
+            deferredAccountNotice =
+              'Đã khôi phục bản nháp của tài khoản. Cấu hình tạm từ phiên khách chưa được áp dụng vì tài khoản đã có sẵn bản nháp.'
+          }
+        } else if (saveIntent.valid) {
+          // Tài khoản chưa có bản nháp và có intent lưu từ phiên khách: đọc guest draft
+          const guestDraftResult = loadDraft('guest')
+          if (guestDraftResult.draft) {
+            draftToRestore = guestDraftResult.draft
+            transferGuestToUser = true
+          } else {
+            // Guest draft đã hỏng hoặc quá hạn: kết thúc intent
+            clearSaveIntent()
+            if (guestDraftResult.notice) {
+              noticeMessage = guestDraftResult.notice
+            }
+          }
+        }
+      } else {
+        // Staff / Admin: chỉ tải nháp của tài khoản nếu có; KHÔNG tự nhận hoặc tiêu thụ intent của luồng này
+        const userDraftResult = loadDraft(user.id)
+        if (userDraftResult.draft) {
+          draftToRestore = userDraftResult.draft
         }
       }
     } else if (authStatus === 'anonymous') {
       const guestDraftResult = loadDraft('guest')
+      if (guestDraftResult.storageUnavailable) {
+        setStorageWarning(
+          'Trình duyệt đang chặn bộ nhớ tạm (sessionStorage). Cấu hình sẽ không được giữ lại khi tải lại trang.'
+        )
+      }
       if (guestDraftResult.notice) {
         noticeMessage = guestDraftResult.notice
       }
@@ -167,7 +196,9 @@ export function usePCBuilder() {
 
     if (!draftToRestore || draftToRestore.items.length === 0) {
       isRestoreResolvedRef.current = true
-      if (noticeMessage) {
+      if (deferredAccountNotice) {
+        setDraftRestoreNotice(deferredAccountNotice)
+      } else if (noticeMessage) {
         setDraftRestoreNotice(noticeMessage)
       }
       return
@@ -223,6 +254,7 @@ export function usePCBuilder() {
       if (restoredItems.length > 0) {
         selectedItemsRef.current = restoredItems
         setSelectedItems(restoredItems)
+        setLastModifiedAt(draftToRestore.updatedAt)
 
         const restoredKey = restoredItems
           .map((item) => `${item.product.id}:${item.quantity}`)
@@ -233,17 +265,29 @@ export function usePCBuilder() {
         setCompletedKey(restoredKey)
 
         if (transferGuestToUser && user?.id) {
-          // Chuyển giao guest draft sang user draft với updatedAt gốc
-          saveDraft(user.id, restoredItems, draftToRestore.updatedAt)
-          removeDraft('guest')
-          setDraftRestoreNotice('Đã khôi phục cấu hình từ phiên khách vào tài khoản của bạn.')
+          // Ghi user draft với updatedAt gốc
+          const writeOk = saveDraft(user.id, restoredItems, draftToRestore.updatedAt)
+          if (!writeOk) {
+            // Ghi user draft thất bại: giữ guest và intent, hiển thị storage warning, cho retry
+            setStorageWarning(
+              'Trình duyệt đang chặn bộ nhớ tạm (sessionStorage). Cấu hình sẽ không được giữ lại khi tải lại trang.'
+            )
+          } else {
+            // Ghi thành công: dọn guest draft và tiêu thụ intent
+            removeDraft('guest')
+            clearSaveIntent()
+            setDraftRestoreNotice('Đã khôi phục cấu hình từ phiên khách vào tài khoản của bạn.')
+          }
         } else {
           // Giữ draft với updatedAt gốc trong storage
           const currentOwner =
             authStatus === 'authenticated' && user?.id ? user.id : 'guest'
           saveDraft(currentOwner, restoredItems, draftToRestore.updatedAt)
 
-          if (restoredItems.length < inputs.length) {
+          if (deferredAccountNotice) {
+            // Thông báo ưu tiên nháp tài khoản không bị thông báo generic ghi đè
+            setDraftRestoreNotice(deferredAccountNotice)
+          } else if (restoredItems.length < inputs.length) {
             setDraftRestoreNotice(
               `Đã khôi phục ${restoredItems.length}/${inputs.length} linh kiện. Một số linh kiện trước đó không còn tồn tại trong hệ thống.`
             )
@@ -252,6 +296,14 @@ export function usePCBuilder() {
           }
         }
       } else {
+        // Toàn bộ linh kiện không còn tồn tại: dọn draft hiện hành và intent phù hợp
+        const currentOwner =
+          authStatus === 'authenticated' && user?.id ? user.id : 'guest'
+        removeDraft(currentOwner)
+        if (transferGuestToUser) {
+          clearSaveIntent()
+          removeDraft('guest')
+        }
         setDraftRestoreNotice(
           'Không thể khôi phục các linh kiện do đã bị ngừng kinh doanh hoặc không còn tồn tại.'
         )
@@ -261,7 +313,7 @@ export function usePCBuilder() {
         return
       }
 
-      // Giữ nguyên draft trong storage để cho phép thử lại
+      // Giữ nguyên guest payload, updatedAt và intent trong storage để người dùng có thể thử lại
       let msg = 'Không thể xác thực lại bản nháp cấu hình với máy chủ. Vui lòng thử lại.'
       if (err instanceof ApiError && err.description) {
         msg = err.description
@@ -352,6 +404,7 @@ export function usePCBuilder() {
       const current = selectedItemsRef.current
       const next = computeSelectedProduct(current, product)
       if (next !== current) {
+        setLastModifiedAt(Date.now())
         selectedItemsRef.current = next
         setSelectedItems(next)
         persistSelection(next)
@@ -383,6 +436,7 @@ export function usePCBuilder() {
       })
 
       if (changed) {
+        setLastModifiedAt(Date.now())
         selectedItemsRef.current = next
         setSelectedItems(next)
         persistSelection(next)
@@ -398,6 +452,7 @@ export function usePCBuilder() {
       const current = selectedItemsRef.current
       const next = current.filter((item) => item.product.id !== productId)
       if (next.length !== current.length) {
+        setLastModifiedAt(Date.now())
         selectedItemsRef.current = next
         setSelectedItems(next)
         persistSelection(next)
@@ -413,6 +468,7 @@ export function usePCBuilder() {
       abortControllerRef.current.abort()
     }
     activeSequenceRef.current++
+    setLastModifiedAt(null)
     selectedItemsRef.current = []
     setSelectedItems([])
     setPreviewSnapshot(null)
@@ -519,6 +575,7 @@ export function usePCBuilder() {
     previewResult: effectivePreviewResult,
     isPreviewLoading,
     previewError: effectivePreviewError,
+    lastModifiedAt,
     selectProduct,
     updateItemQuantity,
     removeItem,

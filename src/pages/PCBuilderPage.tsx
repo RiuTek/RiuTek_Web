@@ -27,6 +27,7 @@ export const PCBuilderPage: React.FC = () => {
     previewResult,
     isPreviewLoading,
     previewError,
+    lastModifiedAt,
     selectProduct,
     updateItemQuantity,
     removeItem,
@@ -211,6 +212,7 @@ export const PCBuilderPage: React.FC = () => {
               hasItems={selectedItems.length > 0}
               itemCount={selectedItems.length}
               onClearAll={clearBuild}
+              lastModifiedAt={lastModifiedAt}
             />
           </div>
         </div>
