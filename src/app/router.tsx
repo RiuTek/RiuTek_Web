@@ -12,6 +12,8 @@ import { CheckoutCompletePage } from '../pages/CheckoutCompletePage'
 import { StripeCheckoutCancelPage } from '../pages/StripeCheckoutCancelPage'
 import { MyOrdersPage } from '../pages/MyOrdersPage'
 import { OrderDetailPage } from '../pages/OrderDetailPage'
+import { MyPCBuildsPage } from '../pages/MyPCBuildsPage'
+import { PCBuildDetailPage } from '../pages/PCBuildDetailPage'
 import { ProductBuyNowPage } from '../pages/ProductBuyNowPage'
 import { PCBuilderPage } from '../pages/PCBuilderPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -106,6 +108,22 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <OrderDetailPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/pc-builds',
+        element: (
+          <RequireAuth>
+            <MyPCBuildsPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/pc-builds/:buildId',
+        element: (
+          <RequireAuth>
+            <PCBuildDetailPage />
           </RequireAuth>
         ),
       },

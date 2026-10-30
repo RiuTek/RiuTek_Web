@@ -1,7 +1,8 @@
-import { apiClient } from '../../lib/api'
+import { apiClient, type PagedResult } from '../../lib/api'
 import type {
   CreatePCBuildRequest,
   MyPCBuild,
+  MyPCBuildSummary,
   PCBuildItemInput,
   PCBuildPreviewResult,
 } from './pcBuilderTypes'
@@ -33,6 +34,57 @@ export function createPCBuild(
   signal?: AbortSignal
 ): Promise<MyPCBuild> {
   return apiClient.post<MyPCBuild>('/pc-builds', request, {
+    token,
+    signal,
+  })
+}
+
+/**
+ * Lấy danh sách cấu hình đã lưu của khách hàng hiện tại (phân trang).
+ * Yêu cầu quyền Customer (Bearer token).
+ */
+export function getMyPCBuilds(
+  pageIndex: number = 1,
+  pageSize: number = 20,
+  token: string,
+  signal?: AbortSignal
+): Promise<PagedResult<MyPCBuildSummary>> {
+  return apiClient.get<PagedResult<MyPCBuildSummary>>('/pc-builds/mine', {
+    params: {
+      pageIndex,
+      pageSize,
+    },
+    token,
+    signal,
+  })
+}
+
+/**
+ * Lấy chi tiết một cấu hình đã lưu theo ID.
+ * Yêu cầu quyền Customer (Bearer token).
+ */
+export function getMyPCBuildById(
+  id: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<MyPCBuild> {
+  return apiClient.get<MyPCBuild>(`/pc-builds/${id}`, {
+    token,
+    signal,
+  })
+}
+
+/**
+ * Xóa một cấu hình đã lưu.
+ * Yêu cầu quyền Customer (Bearer token).
+ * Backend trả về 204 NoContent khi thành công.
+ */
+export function deleteMyPCBuild(
+  id: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<void> {
+  return apiClient.delete<void>(`/pc-builds/${id}`, {
     token,
     signal,
   })

@@ -12,9 +12,10 @@ import {
   RotateCcw,
   AlertTriangle,
   Package,
+  Bookmark,
 } from 'lucide-react'
 import { useAuth } from '../../features/auth/AuthContext'
-import { USER_ROLE_LABELS } from '../../features/auth/authTypes'
+import { USER_ROLE_LABELS, UserRole } from '../../features/auth/authTypes'
 import { useCart } from '../../features/cart/CartContext'
 import { BrandLogo } from '../branding/BrandLogo'
 
@@ -33,6 +34,7 @@ export const Header: React.FC = () => {
   const isActive = (path: string) => location.pathname === path
   const isProductsActive = location.pathname.startsWith('/products')
   const isOrdersActive = location.pathname.startsWith('/orders')
+  const isBuildsActive = location.pathname.startsWith('/pc-builds')
 
   const handleLogout = async () => {
     if (isLoggingOut) return
@@ -169,6 +171,20 @@ export const Header: React.FC = () => {
                 <Package className="w-4 h-4" />
                 <span>Đơn Hàng</span>
               </Link>
+              {user.role === UserRole.Customer && (
+                <Link
+                  to="/pc-builds"
+                  className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
+                    isBuildsActive
+                      ? 'bg-red-50 border border-red-200 text-red-600'
+                      : 'hover:bg-slate-50 text-slate-700 hover:text-red-600'
+                  }`}
+                  title="Cấu hình của tôi"
+                >
+                  <Bookmark className="w-4 h-4" />
+                  <span>Cấu Hình</span>
+                </Link>
+              )}
               <Link
                 to="/account"
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
@@ -389,6 +405,29 @@ export const Header: React.FC = () => {
                       </span>
                     </div>
                   </Link>
+                  {user.role === UserRole.Customer && (
+                    <Link
+                      to="/pc-builds"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`block px-4 py-2.5 rounded-xl transition-colors ${
+                        isBuildsActive
+                          ? 'bg-red-50 border border-red-200 text-red-600'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Bookmark className="w-4 h-4 text-red-600" />
+                          <span className="text-xs font-bold text-slate-900">
+                            Cấu Hình Của Tôi
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-semibold text-red-600">
+                          Xem cấu hình &rarr;
+                        </span>
+                      </div>
+                    </Link>
+                  )}
                   <Link
                     to="/account"
                     onClick={() => setMobileMenuOpen(false)}

@@ -15,6 +15,7 @@ import {
   ShoppingBag,
   Check,
   ArrowRight,
+  ExternalLink,
   X,
 } from 'lucide-react'
 import { ApiError } from '../../../lib/api'
@@ -690,6 +691,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                 {addToCartError}
               </p>
             )}
+
+            <div className="flex items-center justify-between pt-2 border-t border-emerald-200/70">
+              <Link
+                to={`/pc-builds/${savedBuildInfo.build.id}`}
+                className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900 hover:text-red-600 underline transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Xem cấu hình đã lưu</span>
+              </Link>
+            </div>
           </div>
         )}
 

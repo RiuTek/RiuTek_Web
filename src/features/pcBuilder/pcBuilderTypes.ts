@@ -138,6 +138,23 @@ export enum PCBuildStatus {
   Ordered = 3,
 }
 
+export const PC_BUILD_STATUS_LABELS: Record<PCBuildStatus, string> = {
+  [PCBuildStatus.Draft]: 'Bản nháp',
+  [PCBuildStatus.Saved]: 'Đã lưu',
+  [PCBuildStatus.Ordered]: 'Đã đặt hàng',
+}
+
+export function isOrderedBuild(status: PCBuildStatus | string | number): boolean {
+  return status === PCBuildStatus.Ordered || status === 'Ordered' || status === 3
+}
+
+export function getPCBuildStatusLabel(status: PCBuildStatus | string | number): string {
+  if (status === PCBuildStatus.Draft || status === 'Draft' || status === 1) return 'Bản nháp'
+  if (status === PCBuildStatus.Saved || status === 'Saved' || status === 2) return 'Đã lưu'
+  if (status === PCBuildStatus.Ordered || status === 'Ordered' || status === 3) return 'Đã đặt hàng'
+  return 'Không xác định'
+}
+
 /**
  * Request payload gửi lên POST /api/v1/pc-builds để lưu cấu hình
  */
@@ -185,6 +202,23 @@ export interface MyPCBuild {
   canPurchaseAll: boolean
   status: PCBuildStatus
   items: MyPCBuildItem[]
+  createdAt: string
+  updatedAt: string | null
+}
+
+/**
+ * Tóm tắt một cấu hình đã lưu trong danh sách (MyPCBuildSummaryDto)
+ */
+export interface MyPCBuildSummary {
+  id: string
+  name: string
+  description: string | null
+  totalPrice: number
+  estimatedWattage: number
+  isCompatible: boolean
+  canPurchaseAll: boolean
+  itemCount: number
+  status: PCBuildStatus
   createdAt: string
   updatedAt: string | null
 }

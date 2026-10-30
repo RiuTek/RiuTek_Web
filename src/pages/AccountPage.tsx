@@ -13,11 +13,12 @@ import {
   Save,
   X,
   Package,
+  Bookmark,
   ChevronRight,
 } from 'lucide-react'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
-import { USER_ROLE_LABELS, type AuthUser, type UpdateProfileRequest } from '../features/auth/authTypes'
+import { USER_ROLE_LABELS, UserRole, type AuthUser, type UpdateProfileRequest } from '../features/auth/authTypes'
 import { AddressBook } from '../features/addresses/components/AddressBook'
 
 
@@ -452,6 +453,34 @@ export const AccountPage: React.FC = () => {
           </div>
         </div>
       </Link>
+
+      {/* Quick PC Builds Entry Card (Customer Only) */}
+      {user.role === UserRole.Customer && (
+        <Link
+          to="/pc-builds"
+          className="block bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 hover:border-red-200 hover:shadow-md transition-all group shadow-xs"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center border border-red-100 group-hover:scale-105 transition-transform flex-shrink-0">
+                <Bookmark className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 group-hover:text-red-600 transition-colors">
+                  Cấu Hình Của Tôi
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-500">
+                  Xem lại các cấu hình PC bạn đã lưu, kiểm tra tương thích và thêm nhanh vào giỏ hàng.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-xs font-bold text-red-600 group-hover:translate-x-1 transition-transform flex-shrink-0">
+              <span className="hidden sm:inline">Xem cấu hình</span>
+              <ChevronRight className="w-4 h-4" />
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* Edit Profile Form */}
       <ProfileForm user={user} updateProfile={updateProfile} />
