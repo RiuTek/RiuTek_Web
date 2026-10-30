@@ -6,6 +6,11 @@ import {
   Zap,
   ShieldCheck,
   ArrowLeft,
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  RotateCcw,
+  X,
 } from 'lucide-react'
 import { usePCBuilder } from '../features/pcBuilder/usePCBuilder'
 import { PCBuilderSlotList } from '../features/pcBuilder/components/PCBuilderSlotList'
@@ -26,6 +31,12 @@ export const PCBuilderPage: React.FC = () => {
     removeItem,
     clearBuild,
     retryPreview,
+    isRestoringGuestBuild,
+    guestRestoreNotice,
+    guestRestoreError,
+    retryGuestRestore,
+    dismissGuestRestoreNotice,
+    dismissGuestRestoreError,
   } = usePCBuilder()
 
   const handleSelectProduct = (product: ProductSummary) => {
@@ -84,7 +95,61 @@ export const PCBuilderPage: React.FC = () => {
       </div>
 
       {/* Main Content Layout */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-4">
+        {/* Guest Restore Feedback Banners */}
+        {isRestoringGuestBuild && (
+          <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center gap-2.5">
+            <Loader2 className="w-4 h-4 text-blue-600 animate-spin flex-shrink-0" />
+            <span className="font-semibold">
+              Đang khôi phục và xác thực lại cấu hình từ phiên trước với máy chủ...
+            </span>
+          </div>
+        )}
+
+        {guestRestoreNotice && (
+          <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+              <span className="font-semibold">{guestRestoreNotice}</span>
+            </div>
+            <button
+              type="button"
+              onClick={dismissGuestRestoreNotice}
+              className="text-emerald-700 hover:text-emerald-950 p-1 rounded-lg"
+              aria-label="Đóng thông báo"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {guestRestoreError && (
+          <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+              <span className="font-semibold">{guestRestoreError}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={retryGuestRestore}
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 shadow-2xs"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Thử lại</span>
+              </button>
+              <button
+                type="button"
+                onClick={dismissGuestRestoreError}
+                className="text-rose-700 hover:text-rose-950 p-1 rounded-lg"
+                aria-label="Đóng thông báo lỗi"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Stable Slot List */}
           <div className="lg:col-span-7 xl:col-span-8 space-y-4">

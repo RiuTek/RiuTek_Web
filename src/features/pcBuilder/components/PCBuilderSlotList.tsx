@@ -195,8 +195,12 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
 
                         <div className="min-w-0 flex-1 space-y-0.5">
                           <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                            <span>{product.brand}</span>
-                            <span>•</span>
+                            {product.brand && (
+                              <>
+                                <span>{product.brand}</span>
+                                <span>•</span>
+                              </>
+                            )}
                             <span>SKU: {preview?.sku || product.sku}</span>
                           </div>
                           <h4

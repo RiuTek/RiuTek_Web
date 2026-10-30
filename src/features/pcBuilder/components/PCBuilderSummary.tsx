@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -48,6 +48,7 @@ interface PCBuilderSummaryProps {
 interface SavedBuildState {
   build: MyPCBuild
   configKeyAtSave: string
+  ownerUserId: string
 }
 
 export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
@@ -80,6 +81,26 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   const [isAddingToCart, setIsAddingToCart] = useState(false)
   const [addToCartError, setAddToCartError] = useState<string | null>(null)
   const [addToCartSuccess, setAddToCartSuccess] = useState(false)
+  const [guestSaveError, setGuestSaveError] = useState<string | null>(null)
+
+  const userRef = useRef(user)
+  const authStatusRef = useRef(authStatus)
+
+  // Reset toàn bộ state saved build, form và thông báo khi đăng xuất hoặc đổi tài khoản
+  const previousUserIdRef = useRef(user?.id)
+  useEffect(() => {
+    userRef.current = user
+    authStatusRef.current = authStatus
+
+    if (previousUserIdRef.current !== user?.id || authStatus !== 'authenticated') {
+      previousUserIdRef.current = user?.id
+      setSavedBuildInfo(null)
+      setAddToCartSuccess(false)
+      setAddToCartError(null)
+      setShowSaveModal(false)
+      setSaveError(null)
+    }
+  }, [user, user?.id, authStatus])
 
   // Config key hiện tại của selectedItems
   const currentConfigKey = useMemo(() => {
@@ -90,9 +111,12 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       .join(';')
   }, [selectedItems])
 
-  // Kiểm tra xem cấu hình hiện tại có còn khớp với snapshot lúc save không
+  // Kiểm tra quyền sở hữu và khớp snapshot cấu hình lúc save
   const isCurrentBuildSaved =
     savedBuildInfo !== null &&
+    authStatus === 'authenticated' &&
+    user?.role === UserRole.Customer &&
+    user?.id === savedBuildInfo.ownerUserId &&
     savedBuildInfo.configKeyAtSave === currentConfigKey &&
     hasItems
 
@@ -107,14 +131,19 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   // Mở form lưu cấu hình
   const handleOpenSaveModal = () => {
     if (!hasItems) return
+    setGuestSaveError(null)
 
-    // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu tạm vào sessionStorage rồi chuyển hướng sang login
+    // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu tối thiểu { savedAt, items: [{ productId, quantity }] }
     if (authStatus === 'anonymous') {
       try {
+        if (typeof window === 'undefined' || !window.sessionStorage) {
+          throw new Error('Trình duyệt không hỗ trợ sessionStorage.')
+        }
+
         const guestData = {
           savedAt: Date.now(),
-          items: selectedItems.map((item) => ({
-            product: item.product,
+          items: selectedItems.slice(0, 30).map((item) => ({
+            productId: item.product.id,
             quantity: item.quantity,
           })),
         }
@@ -122,11 +151,15 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
           PC_BUILDER_GUEST_STORAGE_KEY,
           JSON.stringify(guestData)
         )
+        navigate('/login', { state: { from: '/pc-builder' } })
+        return
       } catch {
-        // Tiếp tục navigate nếu sessionStorage bị chặn
+        // Storage bị chặn: GIỮ NGUYÊN cấu hình, KHÔNG điều hướng làm mất lựa chọn
+        setGuestSaveError(
+          'Không thể lưu tạm cấu hình vào bộ nhớ trình duyệt (sessionStorage bị tắt hoặc đầy). Vui lòng đăng nhập trước khi xây dựng cấu hình để tránh mất dữ liệu.'
+        )
+        return
       }
-      navigate('/login', { state: { from: '/pc-builder' } })
-      return
     }
 
     // 2. Nếu auth đang checking hoặc unavailable
@@ -186,6 +219,8 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     setIsSaving(true)
     setSaveError(null)
 
+    const expectedOwnerId = user.id
+
     try {
       const token = await getAccessToken(false)
       if (!token) {
@@ -206,13 +241,21 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         token
       )
 
-      setSavedBuildInfo({
-        build: result,
-        configKeyAtSave: currentConfigKey,
-      })
-      setShowSaveModal(false)
-      setAddToCartSuccess(false)
-      setAddToCartError(null)
+      // Guard: Chỉ cập nhật state nếu user vẫn đang là chủ sở hữu lúc request bắt đầu
+      if (
+        userRef.current?.id === expectedOwnerId &&
+        authStatusRef.current === 'authenticated' &&
+        userRef.current?.role === UserRole.Customer
+      ) {
+        setSavedBuildInfo({
+          build: result,
+          configKeyAtSave: currentConfigKey,
+          ownerUserId: expectedOwnerId,
+        })
+        setShowSaveModal(false)
+        setAddToCartSuccess(false)
+        setAddToCartError(null)
+      }
     } catch (err: unknown) {
       let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
       if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
@@ -222,23 +265,45 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       } else if (err instanceof Error) {
         msg = err.message
       }
-      setSaveError(msg)
+      if (userRef.current?.id === expectedOwnerId && authStatusRef.current === 'authenticated') {
+        setSaveError(msg)
+      }
     } finally {
-      setIsSaving(false)
+      if (userRef.current?.id === expectedOwnerId) {
+        setIsSaving(false)
+      }
     }
   }
 
   // Thêm cấu hình đã lưu vào giỏ hàng
   const handleAddToCart = async () => {
-    if (!savedBuildInfo || isAddingToCart) return
+    // Kiểm tra tính hợp lệ và quyền sở hữu trước khi gọi API
+    if (
+      !savedBuildInfo ||
+      isAddingToCart ||
+      authStatus !== 'authenticated' ||
+      user?.role !== UserRole.Customer ||
+      user?.id !== savedBuildInfo.ownerUserId
+    ) {
+      return
+    }
 
+    const currentOwnerId = user.id
+    const targetBuildId = savedBuildInfo.build.id
     setIsAddingToCart(true)
     setAddToCartError(null)
     setAddToCartSuccess(false)
 
     try {
-      await addFromPCBuild(savedBuildInfo.build.id)
-      setAddToCartSuccess(true)
+      await addFromPCBuild(targetBuildId)
+      // Guard: Chỉ hiển thị success nếu user vẫn là chủ sở hữu
+      if (
+        userRef.current?.id === currentOwnerId &&
+        authStatusRef.current === 'authenticated' &&
+        userRef.current?.role === UserRole.Customer
+      ) {
+        setAddToCartSuccess(true)
+      }
     } catch (err: unknown) {
       let msg = 'Không thể thêm cấu hình vào giỏ hàng. Vui lòng thử lại.'
       if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
@@ -246,9 +311,13 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       } else if (err instanceof Error) {
         msg = err.message
       }
-      setAddToCartError(msg)
+      if (userRef.current?.id === currentOwnerId && authStatusRef.current === 'authenticated') {
+        setAddToCartError(msg)
+      }
     } finally {
-      setIsAddingToCart(false)
+      if (userRef.current?.id === currentOwnerId) {
+        setIsAddingToCart(false)
+      }
     }
   }
 
@@ -580,6 +649,27 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                 {addToCartError}
               </p>
             )}
+          </div>
+        )}
+
+        {/* Guest Storage Error Alert */}
+        {guestSaveError && (
+          <div
+            role="alert"
+            className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs flex items-start gap-2"
+          >
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-semibold">{guestSaveError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGuestSaveError(null)}
+              className="text-amber-500 hover:text-amber-800 p-0.5"
+              aria-label="Đóng thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 

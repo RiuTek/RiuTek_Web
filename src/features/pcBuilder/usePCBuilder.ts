@@ -14,6 +14,7 @@ import {
 import type {
   PCBuildItemInput,
   PCBuildPreviewResult,
+  PCBuilderProductItem,
   SelectedPCBuildItem,
 } from './pcBuilderTypes'
 
@@ -30,74 +31,203 @@ interface ErrorSnapshot {
 interface StoredGuestBuild {
   savedAt: number
   items: Array<{
-    product: ProductSummary
+    productId: string
     quantity: number
   }>
 }
 
-function loadStoredGuestItems(): SelectedPCBuildItem[] {
-  if (typeof window === 'undefined' || !window.sessionStorage) return []
-  try {
-    const raw = sessionStorage.getItem(PC_BUILDER_GUEST_STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as StoredGuestBuild
-    if (
-      !parsed ||
-      typeof parsed.savedAt !== 'number' ||
-      !Array.isArray(parsed.items) ||
-      Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS
-    ) {
-      sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-      return []
-    }
-
-    // Validate cấu trúc từng item
-    const validItems: SelectedPCBuildItem[] = []
-    for (const entry of parsed.items) {
-      if (
-        entry &&
-        entry.product &&
-        typeof entry.product.id === 'string' &&
-        typeof entry.product.name === 'string' &&
-        typeof entry.product.componentType === 'number' &&
-        typeof entry.quantity === 'number' &&
-        entry.quantity >= 1 &&
-        entry.quantity <= 20
-      ) {
-        validItems.push({
-          product: entry.product,
-          quantity: entry.quantity,
-        })
-      }
-    }
-
-    // Đã restore thành công -> xóa dữ liệu tạm khỏi sessionStorage
-    sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-    return validItems
-  } catch {
-    try {
-      sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
-    } catch {
-      // Bỏ qua lỗi sessionStorage nếu bị chặn
-    }
-    return []
-  }
-}
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export function usePCBuilder() {
-  const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>(() =>
-    loadStoredGuestItems()
-  )
+  const [selectedItems, setSelectedItems] = useState<SelectedPCBuildItem[]>([])
   const [activeSlot, setActiveSlot] = useState<ComponentType | null>(null)
   const [previewSnapshot, setPreviewSnapshot] = useState<PreviewSnapshot | null>(null)
   const [errorSnapshot, setErrorSnapshot] = useState<ErrorSnapshot | null>(null)
   const [completedKey, setCompletedKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
+  // Trạng thái khôi phục cấu hình từ guest session
+  const [isRestoringGuestBuild, setIsRestoringGuestBuild] = useState(false)
+  const [guestRestoreNotice, setGuestRestoreNotice] = useState<string | null>(null)
+  const [guestRestoreError, setGuestRestoreError] = useState<string | null>(null)
+
   // Request tracking guards
   const activeSequenceRef = useRef<number>(0)
   const latestConfigKeyRef = useRef<string>('')
   const abortControllerRef = useRef<AbortController | null>(null)
+  const hasAttemptedRestoreRef = useRef(false)
+
+  // Khôi phục cấu hình khách vãng lai sau đăng nhập và xác thực lại dữ liệu từ Backend
+  const restoreGuestBuild = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.sessionStorage) return
+
+    let raw: string | null
+    try {
+      raw = sessionStorage.getItem(PC_BUILDER_GUEST_STORAGE_KEY)
+    } catch {
+      return
+    }
+
+    if (!raw) return
+
+    let parsed: StoredGuestBuild
+    try {
+      parsed = JSON.parse(raw) as StoredGuestBuild
+    } catch {
+      // Payload hỏng -> xóa an toàn
+      try {
+        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+      } catch {
+        // Bỏ qua lỗi storage
+      }
+      setGuestRestoreNotice('Dữ liệu cấu hình tạm bị hỏng và đã được làm mới.')
+      return
+    }
+
+    if (
+      !parsed ||
+      typeof parsed.savedAt !== 'number' ||
+      !Array.isArray(parsed.items) ||
+      Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS
+    ) {
+      // Hết hạn hoặc cấu trúc sai -> xóa
+      try {
+        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+      } catch {
+        // Bỏ qua lỗi storage
+      }
+      if (parsed && Date.now() - parsed.savedAt > PC_BUILDER_GUEST_STORAGE_TTL_MS) {
+        setGuestRestoreNotice('Cấu hình lưu tạm đã quá hạn (1 giờ) và đã được xóa.')
+      }
+      return
+    }
+
+    // Validate chặt chẽ từng item (chỉ nhận UUID hợp lệ, quantity 1..20, tối đa 30 dòng, loại bỏ duplicate)
+    const validInputs: PCBuildItemInput[] = []
+    const seenIds = new Set<string>()
+
+    for (const item of parsed.items.slice(0, MAX_BUILD_ITEMS)) {
+      if (
+        item &&
+        typeof item.productId === 'string' &&
+        UUID_REGEX.test(item.productId.trim()) &&
+        typeof item.quantity === 'number' &&
+        Number.isInteger(item.quantity) &&
+        item.quantity >= 1 &&
+        item.quantity <= MAX_MULTI_CHOICE_QUANTITY
+      ) {
+        const cleanId = item.productId.trim().toLowerCase()
+        if (!seenIds.has(cleanId)) {
+          seenIds.add(cleanId)
+          validInputs.push({
+            productId: cleanId,
+            quantity: item.quantity,
+          })
+        }
+      }
+    }
+
+    if (validInputs.length === 0) {
+      try {
+        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+      } catch {
+        // Bỏ qua lỗi storage
+      }
+      setGuestRestoreNotice('Cấu hình lưu tạm không chứa linh kiện hợp lệ.')
+      return
+    }
+
+    setIsRestoringGuestBuild(true)
+    setGuestRestoreError(null)
+
+    try {
+      // Xác thực lại thông tin sản phẩm và giá/kho từ Backend qua preview endpoint
+      const previewRes = await previewPCBuild(validInputs)
+
+      // Chuyển đổi các item trả về thành SelectedPCBuildItem
+      const restoredItems: SelectedPCBuildItem[] = []
+      const returnedMap = new Map<string, (typeof previewRes.items)[0]>()
+      for (const item of previewRes.items) {
+        returnedMap.set(item.productId.toLowerCase(), item)
+      }
+
+      for (const input of validInputs) {
+        const found = returnedMap.get(input.productId)
+        if (found) {
+          const productItem: PCBuilderProductItem = {
+            id: found.productId,
+            name: found.name,
+            slug: found.slug,
+            sku: found.sku,
+            imageUrl: found.imageUrl,
+            componentType: found.componentType,
+            price: found.currentUnitPrice,
+            stockQuantity: found.stockQuantity,
+            isActive: found.isActive,
+            canPurchase: found.canPurchase,
+            issueCode: found.issueCode,
+            specifications: found.specifications,
+          }
+          restoredItems.push({
+            product: productItem,
+            quantity: input.quantity,
+          })
+        }
+      }
+
+      if (restoredItems.length > 0) {
+        setSelectedItems(restoredItems)
+
+        // Tính toán và tạo ngay configKey tương ứng để snapshot khớp lập tức
+        const restoredKey = restoredItems
+          .map((item) => `${item.product.id}:${item.quantity}`)
+          .sort()
+          .join(';')
+
+        setPreviewSnapshot({ configKey: restoredKey, result: previewRes })
+        setCompletedKey(restoredKey)
+
+        if (restoredItems.length < validInputs.length) {
+          setGuestRestoreNotice(
+            `Đã khôi phục ${restoredItems.length}/${validInputs.length} linh kiện. Một số linh kiện trước đó không còn tồn tại trong hệ thống.`
+          )
+        } else {
+          setGuestRestoreNotice('Đã khôi phục cấu hình từ phiên trước thành công!')
+        }
+      } else {
+        setGuestRestoreNotice(
+          'Không thể khôi phục các linh kiện do đã bị ngừng kinh doanh hoặc không còn tồn tại.'
+        )
+      }
+
+      // Xóa sessionStorage sau khi khôi phục thành công
+      try {
+        sessionStorage.removeItem(PC_BUILDER_GUEST_STORAGE_KEY)
+      } catch {
+        // Bỏ qua
+      }
+    } catch (err: unknown) {
+      // Khi gặp lỗi mạng / API: GIỮ NGUYÊN payload trong sessionStorage để người dùng có thể thử lại
+      let msg = 'Không thể xác thực lại cấu hình lưu tạm với máy chủ. Vui lòng thử lại.'
+      if (err instanceof ApiError && err.description) {
+        msg = err.description
+      } else if (err instanceof Error) {
+        msg = err.message
+      }
+      setGuestRestoreError(msg)
+    } finally {
+      setIsRestoringGuestBuild(false)
+    }
+  }, [])
+
+  // Chạy restore khi hook mount lần đầu
+  useEffect(() => {
+    if (!hasAttemptedRestoreRef.current) {
+      hasAttemptedRestoreRef.current = true
+      restoreGuestBuild()
+    }
+  }, [restoreGuestBuild])
 
   // Tập hợp các ID sản phẩm đã chọn
   const selectedProductIds = useMemo(() => {
@@ -313,5 +443,11 @@ export function usePCBuilder() {
     removeItem,
     clearBuild,
     retryPreview,
+    isRestoringGuestBuild,
+    guestRestoreNotice,
+    guestRestoreError,
+    retryGuestRestore: restoreGuestBuild,
+    dismissGuestRestoreNotice: () => setGuestRestoreNotice(null),
+    dismissGuestRestoreError: () => setGuestRestoreError(null),
   }
 }

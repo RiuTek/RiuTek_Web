@@ -1,7 +1,6 @@
 import type {
   ComponentSpecification,
   ComponentType,
-  ProductSummary,
   CpuSocket,
   RamType,
   MotherboardFormFactor,
@@ -76,10 +75,34 @@ export interface PCBuildPreviewResult {
 }
 
 /**
- * State linh kiện đã chọn ở phía Client (chứa đầy đủ ProductSummary để hiển thị)
+ * Thông tin tối thiểu của linh kiện được chọn trong cấu hình phía Client.
+ * Tương thích với cả ProductSummary từ catalog picker lẫn PCBuildPreviewItem từ preview API.
+ */
+export interface PCBuilderProductItem {
+  id: string
+  name: string
+  slug: string
+  sku: string
+  imageUrl: string
+  componentType: ComponentType
+  price: number
+  stockQuantity: number
+  isActive: boolean
+  brand?: string
+  categoryId?: string
+  categoryName?: string
+  originalPrice?: number | null
+  createdAt?: string
+  canPurchase?: boolean
+  issueCode?: string | null
+  specifications?: ComponentSpecification | null
+}
+
+/**
+ * State linh kiện đã chọn ở phía Client
  */
 export interface SelectedPCBuildItem {
-  product: ProductSummary
+  product: PCBuilderProductItem
   quantity: number
 }
 
