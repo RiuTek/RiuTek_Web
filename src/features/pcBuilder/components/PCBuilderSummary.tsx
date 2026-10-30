@@ -83,24 +83,40 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   const [addToCartSuccess, setAddToCartSuccess] = useState(false)
   const [guestSaveError, setGuestSaveError] = useState<string | null>(null)
 
-  const userRef = useRef(user)
-  const authStatusRef = useRef(authStatus)
+  // Định danh phiên xác thực hiện hành
+  const currentSessionKey = useMemo(() => {
+    return authStatus === 'authenticated' && user?.id
+      ? `authenticated:${user.id}`
+      : `unauthenticated:${authStatus}`
+  }, [authStatus, user?.id])
 
-  // Reset toàn bộ state saved build, form và thông báo khi đăng xuất hoặc đổi tài khoản
-  const previousUserIdRef = useRef(user?.id)
+  const activeSessionKeyRef = useRef(currentSessionKey)
+  const saveSequenceRef = useRef(0)
+  const addToCartSequenceRef = useRef(0)
+
+  // Reset toàn bộ state mutation & build của account trước khi đăng xuất hoặc đổi tài khoản
   useEffect(() => {
-    userRef.current = user
-    authStatusRef.current = authStatus
+    if (activeSessionKeyRef.current !== currentSessionKey) {
+      activeSessionKeyRef.current = currentSessionKey
 
-    if (previousUserIdRef.current !== user?.id || authStatus !== 'authenticated') {
-      previousUserIdRef.current = user?.id
+      // Vô hiệu hóa mọi in-flight request của session trước
+      saveSequenceRef.current += 1
+      addToCartSequenceRef.current += 1
+
+      // Reset toàn bộ state mutation, saved build, form & modal của account trước
       setSavedBuildInfo(null)
+      setIsSaving(false)
+      setSaveError(null)
+      setShowSaveModal(false)
+      setBuildName('')
+      setBuildDescription('')
+      setSaveValidationErrors({})
+
+      setIsAddingToCart(false)
       setAddToCartSuccess(false)
       setAddToCartError(null)
-      setShowSaveModal(false)
-      setSaveError(null)
     }
-  }, [user, user?.id, authStatus])
+  }, [currentSessionKey])
 
   // Config key hiện tại của selectedItems
   const currentConfigKey = useMemo(() => {
@@ -219,7 +235,13 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     setIsSaving(true)
     setSaveError(null)
 
+    const requestSessionKey = currentSessionKey
+    const requestSeq = ++saveSequenceRef.current
     const expectedOwnerId = user.id
+
+    const isRequestCurrent = () =>
+      activeSessionKeyRef.current === requestSessionKey &&
+      saveSequenceRef.current === requestSeq
 
     try {
       const token = await getAccessToken(false)
@@ -241,12 +263,8 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         token
       )
 
-      // Guard: Chỉ cập nhật state nếu user vẫn đang là chủ sở hữu lúc request bắt đầu
-      if (
-        userRef.current?.id === expectedOwnerId &&
-        authStatusRef.current === 'authenticated' &&
-        userRef.current?.role === UserRole.Customer
-      ) {
+      // Guard: Chỉ cập nhật state nếu request vẫn thuộc session và sequence hiện hành
+      if (isRequestCurrent()) {
         setSavedBuildInfo({
           build: result,
           configKeyAtSave: currentConfigKey,
@@ -265,11 +283,11 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       } else if (err instanceof Error) {
         msg = err.message
       }
-      if (userRef.current?.id === expectedOwnerId && authStatusRef.current === 'authenticated') {
+      if (isRequestCurrent()) {
         setSaveError(msg)
       }
     } finally {
-      if (userRef.current?.id === expectedOwnerId) {
+      if (isRequestCurrent()) {
         setIsSaving(false)
       }
     }
@@ -288,20 +306,22 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       return
     }
 
-    const currentOwnerId = user.id
+    const requestSessionKey = currentSessionKey
+    const requestSeq = ++addToCartSequenceRef.current
     const targetBuildId = savedBuildInfo.build.id
+
     setIsAddingToCart(true)
     setAddToCartError(null)
     setAddToCartSuccess(false)
 
+    const isRequestCurrent = () =>
+      activeSessionKeyRef.current === requestSessionKey &&
+      addToCartSequenceRef.current === requestSeq
+
     try {
       await addFromPCBuild(targetBuildId)
-      // Guard: Chỉ hiển thị success nếu user vẫn là chủ sở hữu
-      if (
-        userRef.current?.id === currentOwnerId &&
-        authStatusRef.current === 'authenticated' &&
-        userRef.current?.role === UserRole.Customer
-      ) {
+      // Guard: Chỉ hiển thị success nếu request vẫn thuộc session và sequence hiện hành
+      if (isRequestCurrent()) {
         setAddToCartSuccess(true)
       }
     } catch (err: unknown) {
@@ -311,11 +331,11 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       } else if (err instanceof Error) {
         msg = err.message
       }
-      if (userRef.current?.id === currentOwnerId && authStatusRef.current === 'authenticated') {
+      if (isRequestCurrent()) {
         setAddToCartError(msg)
       }
     } finally {
-      if (userRef.current?.id === currentOwnerId) {
+      if (isRequestCurrent()) {
         setIsAddingToCart(false)
       }
     }
