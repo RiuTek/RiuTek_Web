@@ -109,7 +109,6 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   // Async tracking guards
   const activeFetchIdRef = useRef<number>(0)
   const abortControllerRef = useRef<AbortController | null>(null)
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Map quantity của các linh kiện đã chọn
   const selectedQuantityMap = new Map<string, number>()
@@ -137,17 +136,21 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     }
   }, [])
 
-  // Debounce search term 350ms
-  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value
-    setSearchTerm(val)
-    if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current)
-    }
-    searchTimerRef.current = setTimeout(() => {
-      setDebouncedSearch(val.trim())
+  // Debounce search term 350ms (vòng đời độc lập với request fetch)
+  useEffect(() => {
+    const trimmed = searchTerm.trim()
+    const timer = setTimeout(() => {
+      setDebouncedSearch(trimmed)
       setPageIndex(1)
     }, 350)
+
+    return () => {
+      clearTimeout(timer)
+    }
+  }, [searchTerm])
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchTerm(e.target.value)
   }
 
   const handleClearSearch = () => {
@@ -269,9 +272,6 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
 
     return () => {
       controller.abort()
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current)
-      }
     }
   }, [
     activeSlot,
