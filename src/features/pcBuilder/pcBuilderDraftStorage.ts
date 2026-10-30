@@ -62,6 +62,11 @@ export interface DraftValidationResult {
   isOwnerMismatch: boolean
 }
 
+export type StorageReadResult =
+  | { status: 'ok'; value: string }
+  | { status: 'missing' }
+  | { status: 'error'; error: unknown }
+
 /**
  * Truy cập an toàn đối tượng window.sessionStorage
  */
@@ -75,16 +80,30 @@ export function getSessionStorage(): Storage | null {
 }
 
 /**
- * Đọc an toàn giá trị từ sessionStorage
+ * Đọc an toàn giá trị từ sessionStorage, phân biệt rõ missing với read error
+ */
+export function safeStorageGet(key: string): StorageReadResult {
+  const storage = getSessionStorage()
+  if (!storage) {
+    return { status: 'error', error: new Error('Storage is not available') }
+  }
+  try {
+    const value = storage.getItem(key)
+    if (value === null) {
+      return { status: 'missing' }
+    }
+    return { status: 'ok', value }
+  } catch (err) {
+    return { status: 'error', error: err }
+  }
+}
+
+/**
+ * Đọc tương thích chuỗi giá trị (trả về null nếu missing hoặc error)
  */
 export function storageGet(key: string): string | null {
-  const storage = getSessionStorage()
-  if (!storage) return null
-  try {
-    return storage.getItem(key)
-  } catch {
-    return null
-  }
+  const res = safeStorageGet(key)
+  return res.status === 'ok' ? res.value : null
 }
 
 /**
@@ -220,18 +239,25 @@ export function validateDraftPayload(
 }
 
 /**
- * Di chuyển dữ liệu từ key legacy cũ (nếu có) sang định dạng draft chuẩn và dọn dẹp key cũ
+ * Di chuyển dữ liệu từ key legacy cũ (nếu có) sang định dạng draft chuẩn.
+ * Chỉ xóa key legacy sau khi cả draft mới và intent được ghi thành công 100%.
+ * Nếu đã có draft guest mới hơn thì không ghi đè và dọn dẹp an toàn.
  */
-export function migrateLegacyGuestStorage(): PCBuilderDraftPayload | null {
-  const raw = storageGet(LEGACY_GUEST_STORAGE_KEY)
-  if (!raw) return null
+export function migrateLegacyGuestStorage(): { migrated: boolean; error?: boolean } {
+  const legacyRead = safeStorageGet(LEGACY_GUEST_STORAGE_KEY)
+  if (legacyRead.status === 'missing') {
+    return { migrated: false }
+  }
+  if (legacyRead.status === 'error') {
+    return { migrated: false, error: true }
+  }
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(legacyRead.value)
   } catch {
     storageRemove(LEGACY_GUEST_STORAGE_KEY)
-    return null
+    return { migrated: false }
   }
 
   if (
@@ -241,7 +267,7 @@ export function migrateLegacyGuestStorage(): PCBuilderDraftPayload | null {
     !Array.isArray((parsed as Record<string, unknown>).items)
   ) {
     storageRemove(LEGACY_GUEST_STORAGE_KEY)
-    return null
+    return { migrated: false }
   }
 
   const legacySavedAt = (parsed as Record<string, unknown>).savedAt as number
@@ -254,7 +280,26 @@ export function migrateLegacyGuestStorage(): PCBuilderDraftPayload | null {
     now - legacySavedAt > DRAFT_TTL_MS
   ) {
     storageRemove(LEGACY_GUEST_STORAGE_KEY)
-    return null
+    return { migrated: false }
+  }
+
+  // Kiểm tra nếu DRAFT_GUEST_KEY hiện có draft mới hơn
+  const existingGuestRead = safeStorageGet(DRAFT_GUEST_KEY)
+  if (existingGuestRead.status === 'ok') {
+    try {
+      const existing = JSON.parse(existingGuestRead.value) as { updatedAt?: number }
+      if (
+        existing &&
+        typeof existing.updatedAt === 'number' &&
+        existing.updatedAt >= legacySavedAt
+      ) {
+        // Guest draft hiện tại mới hơn legacy: không ghi đè, dọn legacy an toàn
+        storageRemove(LEGACY_GUEST_STORAGE_KEY)
+        return { migrated: false }
+      }
+    } catch {
+      // Nếu existing corrupt thì cho phép ghi đè
+    }
   }
 
   const legacyItems = (parsed as Record<string, unknown>).items as Array<Record<string, unknown>>
@@ -284,21 +329,27 @@ export function migrateLegacyGuestStorage(): PCBuilderDraftPayload | null {
 
   if (validItems.length === 0) {
     storageRemove(LEGACY_GUEST_STORAGE_KEY)
-    return null
+    return { migrated: false }
   }
 
-  const migrated: PCBuilderDraftPayload = {
+  const migratedPayload: PCBuilderDraftPayload = {
     schemaVersion: DRAFT_SCHEMA_VERSION,
     owner: 'guest',
     updatedAt: legacySavedAt,
     items: validItems,
   }
 
-  storageSet(DRAFT_GUEST_KEY, JSON.stringify(migrated))
-  recordSaveIntent(legacySavedAt)
-  storageRemove(LEGACY_GUEST_STORAGE_KEY)
+  // Ghi cả draft và intent: chỉ xóa nguồn khi cả hai ghi thành công
+  const draftWritten = storageSet(DRAFT_GUEST_KEY, JSON.stringify(migratedPayload))
+  const intentWritten = recordSaveIntent(legacySavedAt)
 
-  return migrated
+  if (draftWritten && intentWritten) {
+    storageRemove(LEGACY_GUEST_STORAGE_KEY)
+    return { migrated: true }
+  }
+
+  // Nếu thất bại: giữ nguyên legacy để thử lại sau
+  return { migrated: false, error: true }
 }
 
 /**
@@ -309,20 +360,23 @@ export function loadDraft(owner: 'guest' | string): {
   notice?: string
   storageUnavailable?: boolean
 } {
-  if (!isStorageAvailable()) {
-    return { draft: null, storageUnavailable: true }
-  }
-
   if (owner === 'guest') {
     migrateLegacyGuestStorage()
   }
 
   const storageKey = owner === 'guest' ? DRAFT_GUEST_KEY : DRAFT_USER_KEY
-  const raw = storageGet(storageKey)
-  if (!raw) return { draft: null }
+  const readResult = safeStorageGet(storageKey)
+
+  if (readResult.status === 'error') {
+    return { draft: null, storageUnavailable: true }
+  }
+
+  if (readResult.status === 'missing') {
+    return { draft: null }
+  }
 
   const { payload, isExpired, isCorrupt, isOwnerMismatch } = validateDraftPayload(
-    raw,
+    readResult.value,
     owner
   )
 
@@ -359,10 +413,6 @@ export function saveDraft(
   items: Array<{ product: { id: string }; quantity: number }>,
   customUpdatedAt?: number
 ): boolean {
-  if (!isStorageAvailable()) {
-    return false
-  }
-
   const storageKey = owner === 'guest' ? DRAFT_GUEST_KEY : DRAFT_USER_KEY
 
   if (!items || items.length === 0) {
@@ -389,14 +439,19 @@ export function saveDraft(
  * Chỉ xóa nếu bản nháp trong key thực sự thuộc về owner này (tránh B xóa nháp của A).
  */
 export function removeDraft(owner: 'guest' | string): boolean {
-  if (!isStorageAvailable()) return false
-
   const storageKey = owner === 'guest' ? DRAFT_GUEST_KEY : DRAFT_USER_KEY
-  const raw = storageGet(storageKey)
-  if (!raw) return true
+  const readResult = safeStorageGet(storageKey)
+
+  if (readResult.status === 'error') {
+    return false
+  }
+
+  if (readResult.status === 'missing') {
+    return true
+  }
 
   try {
-    const parsed = JSON.parse(raw) as { owner?: unknown }
+    const parsed = JSON.parse(readResult.value) as { owner?: unknown }
     if (
       parsed &&
       typeof parsed === 'object' &&
@@ -418,8 +473,6 @@ export function removeDraft(owner: 'guest' | string): boolean {
  * Gắn draftUpdatedAt của bản nháp hiện tại để hạn intent không kéo dài tuổi draft.
  */
 export function recordSaveIntent(draftUpdatedAt: number): boolean {
-  if (!isStorageAvailable()) return false
-
   const now = Date.now()
   const intent: SaveIntentPayload = {
     schemaVersion: DRAFT_SCHEMA_VERSION,
@@ -438,13 +491,19 @@ export function peekSaveIntent(): {
   valid: boolean
   draftUpdatedAt?: number
   isExpired?: boolean
+  storageError?: boolean
 } {
-  const raw = storageGet(DRAFT_INTENT_KEY)
-  if (!raw) return { valid: false }
+  const readResult = safeStorageGet(DRAFT_INTENT_KEY)
+  if (readResult.status === 'error') {
+    return { valid: false, storageError: true }
+  }
+  if (readResult.status === 'missing') {
+    return { valid: false }
+  }
 
   let parsed: unknown
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON.parse(readResult.value)
   } catch {
     storageRemove(DRAFT_INTENT_KEY)
     return { valid: false }

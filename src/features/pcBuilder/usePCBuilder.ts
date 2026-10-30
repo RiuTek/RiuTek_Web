@@ -268,9 +268,9 @@ export function usePCBuilder() {
           // Ghi user draft với updatedAt gốc
           const writeOk = saveDraft(user.id, restoredItems, draftToRestore.updatedAt)
           if (!writeOk) {
-            // Ghi user draft thất bại: giữ guest và intent, hiển thị storage warning, cho retry
-            setStorageWarning(
-              'Trình duyệt đang chặn bộ nhớ tạm (sessionStorage). Cấu hình sẽ không được giữ lại khi tải lại trang.'
+            // Ghi user draft thất bại: giữ guest và intent, hiển thị trạng thái lỗi có action Thử lại
+            setDraftRestoreError(
+              'Không thể lưu cấu hình vào bộ nhớ trình duyệt để hoàn tất chuyển giao. Vui lòng bấm Thử lại.'
             )
           } else {
             // Ghi thành công: dọn guest draft và tiêu thụ intent
