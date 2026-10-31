@@ -165,6 +165,15 @@ export interface CreatePCBuildRequest {
 }
 
 /**
+ * Request payload gửi lên PUT /api/v1/pc-builds/{id} để cập nhật cấu hình đã lưu
+ */
+export interface UpdatePCBuildRequest {
+  name: string
+  description?: string | null
+  items: PCBuildItemInput[]
+}
+
+/**
  * Chi tiết một linh kiện trong cấu hình đã lưu (MyPCBuildItemDto)
  */
 export interface MyPCBuildItem {

@@ -14,6 +14,7 @@ import { MyOrdersPage } from '../pages/MyOrdersPage'
 import { OrderDetailPage } from '../pages/OrderDetailPage'
 import { MyPCBuildsPage } from '../pages/MyPCBuildsPage'
 import { PCBuildDetailPage } from '../pages/PCBuildDetailPage'
+import { EditPCBuildPage } from '../pages/EditPCBuildPage'
 import { ProductBuyNowPage } from '../pages/ProductBuyNowPage'
 import { PCBuilderPage } from '../pages/PCBuilderPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
@@ -124,6 +125,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <PCBuildDetailPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/pc-builds/:buildId/edit',
+        element: (
+          <RequireAuth>
+            <EditPCBuildPage />
           </RequireAuth>
         ),
       },

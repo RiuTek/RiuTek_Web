@@ -5,6 +5,7 @@ import type {
   MyPCBuildSummary,
   PCBuildItemInput,
   PCBuildPreviewResult,
+  UpdatePCBuildRequest,
 } from './pcBuilderTypes'
 
 /**
@@ -69,6 +70,22 @@ export function getMyPCBuildById(
   signal?: AbortSignal
 ): Promise<MyPCBuild> {
   return apiClient.get<MyPCBuild>(`/pc-builds/${id}`, {
+    token,
+    signal,
+  })
+}
+
+/**
+ * Cập nhật cấu hình PC đã lưu (thay thế tên, mô tả và toàn bộ linh kiện).
+ * Yêu cầu quyền Customer (Bearer token).
+ */
+export function updateMyPCBuild(
+  id: string,
+  request: UpdatePCBuildRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<MyPCBuild> {
+  return apiClient.put<MyPCBuild>(`/pc-builds/${id}`, request, {
     token,
     signal,
   })

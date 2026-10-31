@@ -36,7 +36,7 @@ interface ErrorSnapshot {
   error: string
 }
 
-function computeSelectedProduct(
+export function computeSelectedProduct(
   prev: SelectedPCBuildItem[],
   product: ProductSummary
 ): SelectedPCBuildItem[] {
