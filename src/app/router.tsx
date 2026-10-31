@@ -16,6 +16,7 @@ import { MyPCBuildsPage } from '../pages/MyPCBuildsPage'
 import { PCBuildDetailPage } from '../pages/PCBuildDetailPage'
 import { EditPCBuildPage } from '../pages/EditPCBuildPage'
 import { ProductBuyNowPage } from '../pages/ProductBuyNowPage'
+import { PCBuildBuyNowPage } from '../pages/PCBuildBuyNowPage'
 import { PCBuilderPage } from '../pages/PCBuilderPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
@@ -77,6 +78,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <ProductBuyNowPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: '/buy-now/pc-build/:buildId',
+        element: (
+          <RequireAuth>
+            <PCBuildBuyNowPage />
           </RequireAuth>
         ),
       },

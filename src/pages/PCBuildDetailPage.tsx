@@ -662,6 +662,24 @@ const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
                   </>
                 )}
               </button>
+
+              {/* Buy Now Button */}
+              <Link
+                to={`/buy-now/pc-build/${build.id}`}
+                className={`px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors inline-flex items-center gap-2 shadow-xs ${
+                  isDeleting || isAddingToCart || !build.canPurchaseAll
+                    ? 'pointer-events-none opacity-40 bg-slate-300 text-slate-500 shadow-none'
+                    : ''
+                }`}
+                title={
+                  !build.canPurchaseAll
+                    ? 'Một số linh kiện đã hết hàng hoặc ngừng kinh doanh'
+                    : 'Đặt mua ngay cấu hình này không qua giỏ hàng'
+                }
+              >
+                <Zap className="w-4 h-4 text-amber-400" />
+                <span>Mua ngay</span>
+              </Link>
             </div>
           </div>
 

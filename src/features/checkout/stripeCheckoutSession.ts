@@ -25,6 +25,15 @@ export type SavePendingStripeData =
       productId: string
       quantity: number
     }
+  | {
+      source: 'pc-build'
+      userId: string
+      orderId: string
+      orderNumber: string
+      idempotencyKey: string
+      addressId: string
+      buildId: string
+    }
 
 /**
  * Kiểm tra tính hợp lệ của Stripe redirect URL.
@@ -48,31 +57,45 @@ export function validateStripeRedirectUrl(urlStr: string): boolean {
  */
 export function savePendingStripeCheckout(data: SavePendingStripeData): void {
   try {
-    const payload: PendingStripeCheckout =
-      data.source === 'cart'
-        ? {
-            version: 2,
-            source: 'cart',
-            userId: data.userId,
-            orderId: data.orderId,
-            orderNumber: data.orderNumber,
-            idempotencyKey: data.idempotencyKey,
-            addressId: data.addressId,
-            expectedCartVersion: data.expectedCartVersion,
-            createdAt: new Date().toISOString(),
-          }
-        : {
-            version: 2,
-            source: 'product',
-            userId: data.userId,
-            orderId: data.orderId,
-            orderNumber: data.orderNumber,
-            idempotencyKey: data.idempotencyKey,
-            addressId: data.addressId,
-            productId: data.productId,
-            quantity: data.quantity,
-            createdAt: new Date().toISOString(),
-          }
+    let payload: PendingStripeCheckout
+    if (data.source === 'cart') {
+      payload = {
+        version: 2,
+        source: 'cart',
+        userId: data.userId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        idempotencyKey: data.idempotencyKey,
+        addressId: data.addressId,
+        expectedCartVersion: data.expectedCartVersion,
+        createdAt: new Date().toISOString(),
+      }
+    } else if (data.source === 'product') {
+      payload = {
+        version: 2,
+        source: 'product',
+        userId: data.userId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        idempotencyKey: data.idempotencyKey,
+        addressId: data.addressId,
+        productId: data.productId,
+        quantity: data.quantity,
+        createdAt: new Date().toISOString(),
+      }
+    } else {
+      payload = {
+        version: 2,
+        source: 'pc-build',
+        userId: data.userId,
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        idempotencyKey: data.idempotencyKey,
+        addressId: data.addressId,
+        buildId: data.buildId,
+        createdAt: new Date().toISOString(),
+      }
+    }
     sessionStorage.setItem(PENDING_STRIPE_STORAGE_KEY, JSON.stringify(payload))
   } catch {
     // sessionStorage có thể bị chặn ở incognito mode hoặc quota exceeded
@@ -228,6 +251,25 @@ export function getPendingStripeCheckout(
           addressId: parsed.addressId,
           productId: parsed.productId.trim(),
           quantity: parsed.quantity,
+          createdAt: parsed.createdAt,
+        }
+      }
+
+      if (parsed.source === 'pc-build') {
+        if (typeof parsed.buildId !== 'string' || !parsed.buildId.trim()) {
+          clearPendingStripeCheckout()
+          return null
+        }
+
+        return {
+          version: 2,
+          source: 'pc-build',
+          userId: parsed.userId,
+          orderId: parsed.orderId,
+          orderNumber: parsed.orderNumber,
+          idempotencyKey: parsed.idempotencyKey.trim(),
+          addressId: parsed.addressId,
+          buildId: parsed.buildId.trim(),
           createdAt: parsed.createdAt,
         }
       }

@@ -6,3 +6,9 @@ export interface BuyNowProductRequest {
   paymentMethod: PaymentMethod
   notes: string | null
 }
+
+export interface BuyNowPCBuildRequest {
+  addressId: string
+  paymentMethod: PaymentMethod
+  notes: string | null
+}

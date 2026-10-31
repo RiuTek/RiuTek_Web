@@ -12,7 +12,7 @@ import {
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { checkoutCart } from '../features/checkout/checkoutApi'
-import { buyNowProduct } from '../features/buyNow/buyNowApi'
+import { buyNowPCBuild, buyNowProduct } from '../features/buyNow/buyNowApi'
 import { cancelMyOrder } from '../features/orders/orderApi'
 import {
   CHECKOUT_ERROR_MESSAGES,
@@ -55,6 +55,19 @@ export const StripeCheckoutCancelPage: React.FC = () => {
             {
               addressId: pending.addressId,
               quantity: pending.quantity,
+              paymentMethod: 'Stripe',
+              notes: null,
+            },
+            pending.idempotencyKey,
+            authToken
+          )
+        }
+
+        if (pending.source === 'pc-build') {
+          return buyNowPCBuild(
+            pending.buildId,
+            {
+              addressId: pending.addressId,
               paymentMethod: 'Stripe',
               notes: null,
             },

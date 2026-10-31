@@ -95,3 +95,7 @@ export type PendingStripeCheckout =
       productId: string
       quantity: number
     })
+  | (PendingStripeCommon & {
+      source: 'pc-build'
+      buildId: string
+    })
