@@ -32,6 +32,7 @@ import {
   getPCBuildStatusLabel,
   isOrderedBuild,
 } from '../features/pcBuilder/pcBuilderTypes'
+import { getComponentStockDisplay } from '../features/pcBuilder/pcBuilderStockHelper'
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -63,6 +64,13 @@ const ComponentRow: React.FC<ComponentRowProps> = ({ item }) => {
 
   const typeLabel =
     COMPONENT_TYPE_LABELS[item.componentType] ?? item.componentType
+
+  const stockDisplay = getComponentStockDisplay({
+    isActive: item.isActive,
+    stockQuantity: item.stockQuantity,
+    quantity: item.quantity,
+    canPurchase: item.canPurchase,
+  })
 
   return (
     <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/70 transition-colors">
@@ -105,17 +113,18 @@ const ComponentRow: React.FC<ComponentRowProps> = ({ item }) => {
               Số lượng: <strong className="text-slate-900">{item.quantity}</strong>
             </span>
             <span>•</span>
-            {item.canPurchase && item.isActive ? (
-              <span className="text-emerald-700 font-semibold inline-flex items-center gap-1">
+            <span className={stockDisplay.badgeClass}>
+              {stockDisplay.iconType === 'check' && (
                 <PackageCheck className="w-3.5 h-3.5" />
-                <span>Còn hàng ({item.stockQuantity})</span>
-              </span>
-            ) : (
-              <span className="text-rose-700 font-semibold inline-flex items-center gap-1 bg-rose-50 px-2 py-0.5 rounded-md">
+              )}
+              {stockDisplay.iconType === 'cross' && (
                 <PackageX className="w-3.5 h-3.5" />
-                <span>{!item.isActive ? 'Ngừng kinh doanh' : 'Hết hàng'}</span>
-              </span>
-            )}
+              )}
+              {stockDisplay.iconType === 'alert' && (
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              )}
+              <span>{stockDisplay.label}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -154,19 +163,23 @@ const ComponentRow: React.FC<ComponentRowProps> = ({ item }) => {
   )
 }
 
-export const PCBuildDetailPage: React.FC = () => {
-  const { buildId } = useParams<{ buildId: string }>()
+interface PCBuildDetailContentProps {
+  buildId: string
+  ownerId: string
+}
+
+const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
+  buildId,
+  ownerId,
+}) => {
   const navigate = useNavigate()
   const { user, getAccessToken } = useAuth()
   const { addFromPCBuild } = useCart()
 
-  const isCustomer = user?.role === UserRole.Customer
-  const isUuidValid = Boolean(buildId && UUID_REGEX.test(buildId))
-
   const [build, setBuild] = useState<MyPCBuild | null>(null)
   const [reloadTrigger, setReloadTrigger] = useState(0)
 
-  const currentQueryKey = `${buildId ?? ''}-${reloadTrigger}`
+  const currentQueryKey = `${buildId}-${reloadTrigger}`
   const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<{
     key: string
@@ -175,13 +188,9 @@ export const PCBuildDetailPage: React.FC = () => {
   } | null>(null)
 
   const currentError = loadError?.key === currentQueryKey ? loadError : null
-  const isLoading =
-    isCustomer &&
-    isUuidValid &&
-    loadedQueryKey !== currentQueryKey &&
-    currentError === null
+  const isLoading = loadedQueryKey !== currentQueryKey && currentError === null
 
-  // Actions states
+  // Actions states (phạm vi riêng của instance buildId + ownerId hiện hành)
   const [isAddingToCart, setIsAddingToCart] = useState(false)
   const [addToCartSuccess, setAddToCartSuccess] = useState(false)
   const [addToCartError, setAddToCartError] = useState<string | null>(null)
@@ -190,23 +199,43 @@ export const PCBuildDetailPage: React.FC = () => {
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  // Request sequencing guard
+  // Request sequencing and lifecycle refs
+  const isMountedRef = useRef(true)
+  const userRef = useRef(user)
+  const buildIdRef = useRef(buildId)
   const requestSeqRef = useRef(0)
+  const addToCartSeqRef = useRef(0)
+  const deleteSeqRef = useRef(0)
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    userRef.current = user
+    buildIdRef.current = buildId
+  }, [user, buildId])
 
   const handleRetryLoad = () => {
     setLoadError(null)
     setReloadTrigger((prev) => prev + 1)
   }
 
-  // Load build details
+  // Tải thông tin chi tiết cấu hình
   useEffect(() => {
-    if (!isCustomer || !isUuidValid || !buildId) {
-      return
-    }
-
     let cancelled = false
     const currentSeq = ++requestSeqRef.current
     const abortController = new AbortController()
+
+    const isContextCurrent = () =>
+      isMountedRef.current &&
+      !cancelled &&
+      requestSeqRef.current === currentSeq &&
+      userRef.current?.id === ownerId &&
+      buildIdRef.current === buildId
 
     getAccessToken(false)
       .then((token) => {
@@ -223,14 +252,14 @@ export const PCBuildDetailPage: React.FC = () => {
         throw err
       })
       .then((res) => {
-        if (!cancelled && requestSeqRef.current === currentSeq && res) {
+        if (isContextCurrent() && res) {
           setBuild(res)
           setLoadError(null)
           setLoadedQueryKey(currentQueryKey)
         }
       })
       .catch((err: unknown) => {
-        if (cancelled || requestSeqRef.current !== currentSeq) return
+        if (!isContextCurrent()) return
         if (err instanceof Error && err.name === 'AbortError') return
 
         if (err instanceof ApiError) {
@@ -266,59 +295,89 @@ export const PCBuildDetailPage: React.FC = () => {
       cancelled = true
       abortController.abort()
     }
-  }, [buildId, isUuidValid, reloadTrigger, currentQueryKey, isCustomer, getAccessToken])
+  }, [buildId, ownerId, reloadTrigger, currentQueryKey, getAccessToken])
 
-  // Handle Add To Cart
+  // Xử lý Thêm vào giỏ hàng với context guard
   const handleAddToCart = async () => {
     if (!build || isAddingToCart || isDeleting || !build.canPurchaseAll) return
+    if (build.id.toLowerCase() !== buildId.toLowerCase()) return
+
+    const addSeq = ++addToCartSeqRef.current
+    const isContextCurrent = () =>
+      isMountedRef.current &&
+      userRef.current?.id === ownerId &&
+      buildIdRef.current === buildId &&
+      addToCartSeqRef.current === addSeq
 
     setIsAddingToCart(true)
     setAddToCartError(null)
     setAddToCartSuccess(false)
 
     try {
-      await addFromPCBuild(build.id)
-      setAddToCartSuccess(true)
-    } catch (err: unknown) {
-      let msg = 'Không thể thêm cấu hình vào giỏ hàng. Vui lòng thử lại.'
-      if (err instanceof ApiError && err.description) {
-        msg = err.description
-      } else if (err instanceof Error) {
-        msg = err.message
+      await addFromPCBuild(buildId)
+      if (isContextCurrent()) {
+        setAddToCartSuccess(true)
       }
-      setAddToCartError(msg)
+    } catch (err: unknown) {
+      if (isContextCurrent()) {
+        let msg = 'Không thể thêm cấu hình vào giỏ hàng. Vui lòng thử lại.'
+        if (err instanceof ApiError && err.description) {
+          msg = err.description
+        } else if (err instanceof Error) {
+          msg = err.message
+        }
+        setAddToCartError(msg)
+      }
     } finally {
-      setIsAddingToCart(false)
+      if (isContextCurrent()) {
+        setIsAddingToCart(false)
+      }
     }
   }
 
-  // Handle Delete PC Build
+  // Xử lý Xóa cấu hình với context guard bảo vệ điều hướng và retry
   const handleConfirmDelete = async () => {
     if (!build || isDeleting || isAddingToCart) return
+    if (build.id.toLowerCase() !== buildId.toLowerCase()) return
+    if (isOrderedBuild(build.status)) return
+
+    const deleteSeq = ++deleteSeqRef.current
+    const isContextCurrent = () =>
+      isMountedRef.current &&
+      userRef.current?.id === ownerId &&
+      buildIdRef.current === buildId &&
+      deleteSeqRef.current === deleteSeq
 
     setIsDeleting(true)
     setDeleteError(null)
 
     try {
       const token = await getAccessToken(false)
+      // Guard: Kiểm tra context trước khi gửi request xóa đầu tiên
+      if (!isContextCurrent()) return
       if (!token) throw new Error('Phiên đăng nhập đã hết hạn.')
 
       try {
-        await deleteMyPCBuild(build.id, token)
+        await deleteMyPCBuild(buildId, token)
       } catch (err: unknown) {
+        // Guard: Kiểm tra context trước khi tạo thêm request retry xóa
+        if (!isContextCurrent()) return
         if (err instanceof ApiError && err.status === 401) {
           const freshToken = await getAccessToken(true)
+          if (!isContextCurrent()) return
           if (!freshToken) throw err
-          await deleteMyPCBuild(build.id, freshToken)
+          await deleteMyPCBuild(buildId, freshToken)
         } else {
           throw err
         }
       }
 
-      // 204 Thành công: Đóng modal và chuyển hướng về danh sách cấu hình
+      // Guard: Chỉ điều hướng và đóng modal nếu người dùng vẫn đang ở trang của cấu hình này
+      if (!isContextCurrent()) return
       setShowDeleteModal(false)
       navigate('/pc-builds', { replace: true })
     } catch (err: unknown) {
+      if (!isContextCurrent()) return
       let msg = 'Không thể xóa cấu hình này. Vui lòng thử lại.'
       if (err instanceof ApiError) {
         if (err.status === 409) {
@@ -331,67 +390,10 @@ export const PCBuildDetailPage: React.FC = () => {
       }
       setDeleteError(msg)
     } finally {
-      setIsDeleting(false)
+      if (isContextCurrent()) {
+        setIsDeleting(false)
+      }
     }
-  }
-
-  // Phân quyền: Staff / Admin
-  if (!isCustomer) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="p-8 rounded-3xl bg-amber-50 border border-amber-200 text-center space-y-4 shadow-sm">
-          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
-            <ShieldAlert className="w-6 h-6" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-slate-900">
-              Chức năng dành riêng cho Khách hàng
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
-              Chức năng quản lý cấu hình PC cá nhân chỉ áp dụng cho tài khoản Khách hàng (Customer).
-            </p>
-          </div>
-          <div className="pt-2 flex justify-center">
-            <Link
-              to="/pc-builder"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
-            >
-              <span>Về trang Xây dựng PC</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Invalid UUID guard (Không gọi API)
-  if (!isUuidValid) {
-    return (
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="p-8 rounded-3xl bg-white border border-slate-200 text-center space-y-4 shadow-xs">
-          <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
-            <AlertCircle className="w-7 h-7" />
-          </div>
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-slate-900">
-              Mã cấu hình không hợp lệ
-            </h2>
-            <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
-              Đường dẫn không đúng định dạng mã định danh cấu hình (UUID). Vui lòng kiểm tra lại đường dẫn.
-            </p>
-          </div>
-          <div className="pt-2 flex justify-center">
-            <Link
-              to="/pc-builds"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>Quay lại danh sách cấu hình</span>
-            </Link>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   // Loading State
@@ -457,7 +459,10 @@ export const PCBuildDetailPage: React.FC = () => {
   if (!build) return null
 
   const isOrdered = isOrderedBuild(build.status)
-  const isSaved = build.status === PCBuildStatus.Saved || (build.status as unknown) === 'Saved' || (build.status as unknown) === 2
+  const isSaved =
+    build.status === PCBuildStatus.Saved ||
+    (build.status as unknown) === 'Saved' ||
+    (build.status as unknown) === 2
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-10 space-y-6">
@@ -526,7 +531,9 @@ export const PCBuildDetailPage: React.FC = () => {
             </span>
             <div className="flex items-center gap-1.5 text-xs sm:text-sm font-extrabold text-slate-900">
               <Zap className="w-4 h-4 text-amber-500" />
-              <span>{build.estimatedWattage} W (Nguồn khuyến nghị: {build.recommendedPsuWattage} W)</span>
+              <span>
+                {build.estimatedWattage} W (Nguồn khuyến nghị: {build.recommendedPsuWattage} W)
+              </span>
             </div>
           </div>
 
@@ -718,7 +725,9 @@ export const PCBuildDetailPage: React.FC = () => {
                     Xác nhận xóa cấu hình
                   </h3>
                   <p className="text-xs sm:text-sm text-slate-600 mt-1">
-                    Bạn có chắc chắn muốn xóa cấu hình <strong className="text-slate-900 font-bold">"{build.name}"</strong>? Hành động này không thể hoàn tác.
+                    Bạn có chắc chắn muốn xóa cấu hình{' '}
+                    <strong className="text-slate-900 font-bold">"{build.name}"</strong>? Hành
+                    động này không thể hoàn tác.
                   </p>
                 </div>
               </div>
@@ -763,5 +772,80 @@ export const PCBuildDetailPage: React.FC = () => {
         </div>
       )}
     </div>
+  )
+}
+
+export const PCBuildDetailPage: React.FC = () => {
+  const { buildId } = useParams<{ buildId: string }>()
+  const { user } = useAuth()
+
+  const isCustomer = user?.role === UserRole.Customer
+  const isUuidValid = Boolean(buildId && UUID_REGEX.test(buildId))
+
+  // Phân quyền: Staff / Admin
+  if (!isCustomer) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="p-8 rounded-3xl bg-amber-50 border border-amber-200 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-slate-900">
+              Chức năng dành riêng cho Khách hàng
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
+              Chức năng quản lý cấu hình PC cá nhân chỉ áp dụng cho tài khoản Khách hàng (Customer).
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center">
+            <Link
+              to="/pc-builder"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+            >
+              <span>Về trang Xây dựng PC</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Invalid UUID guard (Không gọi API)
+  if (!isUuidValid || !buildId) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <div className="p-8 rounded-3xl bg-white border border-slate-200 text-center space-y-4 shadow-xs">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-lg font-bold text-slate-900">
+              Mã cấu hình không hợp lệ
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 max-w-md mx-auto">
+              Đường dẫn không đúng định dạng mã định danh cấu hình (UUID). Vui lòng kiểm tra lại đường dẫn.
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center">
+            <Link
+              to="/pc-builds"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Quay lại danh sách cấu hình</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <PCBuildDetailContent
+      key={`${user.id}:${buildId}`}
+      buildId={buildId}
+      ownerId={user.id}
+    />
   )
 }
