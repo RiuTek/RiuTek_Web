@@ -21,30 +21,28 @@ import { CheckoutAddressSelector } from '../features/checkout/components/Checkou
 import { CheckoutPaymentSelector } from '../features/checkout/components/CheckoutPaymentSelector'
 import {
   BuyNowPCBuildSummary,
-  type AttemptStatus,
-  type KnownOrderState,
 } from '../features/buyNow/components/BuyNowPCBuildSummary'
 import {
   CHECKOUT_ERROR_MESSAGES,
-  MAX_NOTES_LENGTH,
 } from '../features/checkout/checkoutConstants'
 import {
   savePendingStripeCheckout,
   validateStripeRedirectUrl,
 } from '../features/checkout/stripeCheckoutSession'
+import {
+  type ActiveAttempt,
+  type KnownOrderState,
+  validateAndNormalizeSavedAttempt,
+  canCreateNewOrder,
+  canReplayExistingAttempt,
+  canRecoverKnownOrder,
+  shouldBlockBuyNowNavigation,
+} from '../features/buyNow/pcBuildBuyNowHelper'
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-export interface ActiveAttempt {
-  ownerId: string
-  buildId: string
-  idempotencyKey: string
-  requestPayload: BuyNowPCBuildRequest
-  status: AttemptStatus
-  knownOrder: KnownOrderState | null
-  unresolvedMessage: string | null
-}
+export type { ActiveAttempt, KnownOrderState }
 
 const getAttemptStorageKey = (ownerId: string, buildId: string) =>
   `riutek:pc-build-buy-now-attempt:${ownerId}:${buildId}`
@@ -53,20 +51,8 @@ function loadSavedAttempt(ownerId: string, buildId: string): ActiveAttempt | nul
   try {
     const raw = sessionStorage.getItem(getAttemptStorageKey(ownerId, buildId))
     if (!raw) return null
-    const parsed = JSON.parse(raw) as ActiveAttempt
-    if (
-      parsed &&
-      parsed.ownerId === ownerId &&
-      parsed.buildId === buildId &&
-      typeof parsed.idempotencyKey === 'string' &&
-      parsed.idempotencyKey.length >= 16 &&
-      parsed.idempotencyKey.length <= 128 &&
-      parsed.requestPayload &&
-      typeof parsed.requestPayload.addressId === 'string'
-    ) {
-      return parsed
-    }
-    return null
+    const parsed: unknown = JSON.parse(raw)
+    return validateAndNormalizeSavedAttempt(parsed, ownerId, buildId)
   } catch {
     return null
   }
@@ -156,23 +142,26 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     (activeAttempt !== null &&
       activeAttempt.status !== 'idle')
 
-  // 5. Sequence & Lifecycle refs
+  // 5. Sequence, Lifecycle & Navigation Bypass refs
   const isMountedRef = useRef(true)
   const userRef = useRef(user)
   const buildIdRef = useRef(buildId)
   const recordSeqRef = useRef(0)
   const submitSeqRef = useRef(0)
+  const isSuccessBypassRef = useRef(false)
 
   useEffect(() => {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+      isSuccessBypassRef.current = false
     }
   }, [])
 
   useEffect(() => {
     userRef.current = user
     buildIdRef.current = buildId
+    isSuccessBypassRef.current = false
   }, [user, buildId])
 
   // Đồng bộ activeAttempt vào sessionStorage khi thay đổi
@@ -181,25 +170,28 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
   }, [activeAttempt, ownerId, buildId])
 
   // 6. Navigation protection khi attempt ở trạng thái chưa rõ kết quả hoặc có knownOrder chưa xử lý xong
-  const isNavigationBlocked =
+  const isAttemptActive =
     activeAttempt !== null &&
-    (activeAttempt.status === 'unresolved' ||
-      activeAttempt.status === 'stripe_storage_failed' ||
-      activeAttempt.status === 'stripe_redirect_failed')
+    activeAttempt.status !== 'idle'
 
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      isNavigationBlocked && currentLocation.pathname !== nextLocation.pathname
+      shouldBlockBuyNowNavigation({
+        isAttemptActive,
+        isSuccessBypass: isSuccessBypassRef.current,
+        currentPath: currentLocation.pathname,
+        nextPath: nextLocation.pathname,
+      })
   )
 
   useEffect(() => {
-    if (!isNavigationBlocked) return
+    if (!isAttemptActive) return
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault()
     }
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [isNavigationBlocked])
+  }, [isAttemptActive])
 
   // Tải dữ liệu cấu hình PC từ server
   useEffect(() => {
@@ -280,49 +272,46 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     return build.items.reduce((sum, item) => sum + item.currentPrice * item.quantity, 0)
   }, [build])
 
-  // Kiểm tra điều kiện có thể submit
-  const canSubmit =
-    Boolean(build) &&
-    Boolean(build?.canPurchaseAll) &&
-    Boolean(build && build.items.length > 0) &&
-    Boolean(selectedAddressId) &&
-    notes.trim().length <= MAX_NOTES_LENGTH &&
-    !isSubmitting
+  // Quyết định quyền submit tách biệt hoàn toàn giữa tạo mới và replay
+  const isCustomer = user?.role === UserRole.Customer
 
-  // Xử lý Đặt mua cấu hình (POST /orders/buy-now/pc-build/{buildId})
+  const canCreate = canCreateNewOrder({
+    isCustomer,
+    build,
+    selectedAddressId,
+    notes,
+    isSubmitting,
+    activeAttempt,
+  })
+
+  const canReplay = canReplayExistingAttempt({
+    activeAttempt,
+    isSubmitting,
+  })
+
+  const canRecover = canRecoverKnownOrder({
+    activeAttempt,
+    isSubmitting,
+  })
+
+  // Xử lý Đặt mua cấu hình / Replay (POST /orders/buy-now/pc-build/{buildId})
   const handleBuyNowSubmit = async () => {
-    if (!canSubmit || !build || !selectedAddressId || !user?.id) return
+    if (isSubmitting || !user?.id) return
 
-    const cleanNotes = notes.trim()
-    if (cleanNotes.length > MAX_NOTES_LENGTH) {
-      setSubmitError(`Ghi chú không được vượt quá ${MAX_NOTES_LENGTH} ký tự.`)
-      return
-    }
-
-    const submitSeq = ++submitSeqRef.current
-    const isContextCurrent = () =>
-      isMountedRef.current &&
-      userRef.current?.id === ownerId &&
-      buildIdRef.current === buildId &&
-      submitSeqRef.current === submitSeq
-
-    // Quản lý Attempt & Snapshot:
-    // Nếu attempt hiện tại đang unresolved hoặc stripe_redirect_failed:
-    // TÁI SỬ DỤNG chính xác key và requestPayload snapshot ban đầu!
+    // Fix B: Phân biệt rõ tạo mới vs replay
     let attemptKey: string
     let attemptPayload: BuyNowPCBuildRequest
 
-    if (
-      activeAttempt &&
-      (activeAttempt.status === 'unresolved' ||
-        activeAttempt.status === 'stripe_redirect_failed')
-    ) {
+    if (canReplay && activeAttempt) {
+      // Replay attempt cũ: BẮT BUỘC giữ nguyên key và requestPayload snapshot ban đầu!
       attemptKey = activeAttempt.idempotencyKey
       attemptPayload = activeAttempt.requestPayload
-    } else {
+    } else if (canCreate) {
+      // Tạo đơn mới: sinh key mới một lần và chụp snapshot payload
+      const cleanNotes = notes.trim()
       attemptKey = crypto.randomUUID()
       attemptPayload = {
-        addressId: selectedAddressId,
+        addressId: selectedAddressId!,
         paymentMethod,
         notes: cleanNotes.length > 0 ? cleanNotes : null,
       }
@@ -336,7 +325,18 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
         unresolvedMessage: null,
       }
       setActiveAttempt(newAttempt)
+      // Ghi snapshot đồng bộ trước khi gửi request
+      persistSavedAttempt(newAttempt, ownerId, buildId)
+    } else {
+      return
     }
+
+    const submitSeq = ++submitSeqRef.current
+    const isContextCurrent = () =>
+      isMountedRef.current &&
+      userRef.current?.id === ownerId &&
+      buildIdRef.current === buildId &&
+      submitSeqRef.current === submitSeq
 
     setIsSubmitting(true)
     setSubmitError(null)
@@ -347,7 +347,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       if (!token) throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.')
 
       const executeBuy = async (authToken: string) => {
-        return buyNowPCBuild(build.id, attemptPayload, attemptKey, authToken)
+        return buyNowPCBuild(buildId, attemptPayload, attemptKey, authToken)
       }
 
       let order
@@ -378,9 +378,13 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       }
 
       if (order.paymentMethod === 'COD') {
-        // Đặt hàng COD thành công: xóa attempt khỏi storage và điều hướng
+        // Fix C: Đặt hàng COD thành công -> kích hoạt one-shot bypass đồng bộ trước khi navigate
+        isSuccessBypassRef.current = true
         setActiveAttempt(null)
         persistSavedAttempt(null, ownerId, buildId)
+        if (blocker.state === 'blocked') {
+          blocker.reset()
+        }
         navigate(`/checkout/success?orderId=${encodeURIComponent(order.id)}`)
         return
       }
@@ -388,8 +392,12 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       if (order.paymentMethod === 'Stripe') {
         // Replay check: nếu đơn hàng đã được thanh toán hoặc không còn ở trạng thái PendingPayment
         if (order.paymentStatus === 'Completed' || order.status !== 'PendingPayment') {
+          isSuccessBypassRef.current = true
           setActiveAttempt(null)
           persistSavedAttempt(null, ownerId, buildId)
+          if (blocker.state === 'blocked') {
+            blocker.reset()
+          }
           navigate(`/checkout/success?orderId=${encodeURIComponent(order.id)}`)
           return
         }
@@ -412,6 +420,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
               'Liên kết thanh toán Stripe từ máy chủ không hợp lệ hoặc đã hết hạn.',
           }
           setActiveAttempt(failedAttempt)
+          persistSavedAttempt(failedAttempt, ownerId, buildId)
           setSubmitError(
             'Liên kết thanh toán Stripe không hợp lệ hoặc đã hết hạn. Đơn hàng của bạn đã được lưu trên hệ thống, bạn có thể xem chi tiết đơn để tiếp tục.'
           )
@@ -426,7 +435,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
           orderNumber: order.orderNumber,
           idempotencyKey: attemptKey,
           addressId: attemptPayload.addressId,
-          buildId: build.id,
+          buildId: buildId,
         })
 
         if (!saved) {
@@ -442,6 +451,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
               'Trình duyệt đang chặn lưu trữ phiên thanh toán (sessionStorage).',
           }
           setActiveAttempt(storageFailedAttempt)
+          persistSavedAttempt(storageFailedAttempt, ownerId, buildId)
           setSubmitError(
             'Trình duyệt đang chặn lưu trữ phiên thanh toán tạm thời. Đơn hàng đã được tạo thành công, bạn có thể mở chi tiết đơn hàng để tiếp tục thanh toán.'
           )
@@ -466,6 +476,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
                 : 'Không thể chuyển hướng sang Stripe.',
           }
           setActiveAttempt(redirectFailedAttempt)
+          persistSavedAttempt(redirectFailedAttempt, ownerId, buildId)
           setSubmitError(
             'Không thể chuyển hướng sang Stripe. Đơn hàng đã được lưu an toàn, vui lòng mở chi tiết đơn hàng.'
           )
@@ -534,6 +545,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
           unresolvedMessage: unresolvedMsg,
         }
         setActiveAttempt(unresolvedAttempt)
+        persistSavedAttempt(unresolvedAttempt, ownerId, buildId)
         setSubmitError(unresolvedMsg)
       } else {
         // Lỗi mạng / TypeError / timeout: chuyển attempt sang UNRESOLVED
@@ -552,6 +564,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
           unresolvedMessage: networkMsg,
         }
         setActiveAttempt(unresolvedAttempt)
+        persistSavedAttempt(unresolvedAttempt, ownerId, buildId)
         setSubmitError(networkMsg)
       }
     } finally {
@@ -586,8 +599,8 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     }
   }
 
-  // Loading skeleton
-  if (isLoadingRecord) {
+  // Loading skeleton (khi chưa có attempt và đang tải record)
+  if (isLoadingRecord && !activeAttempt) {
     return (
       <div
         aria-busy="true"
@@ -602,8 +615,8 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     )
   }
 
-  // Error loading record
-  if (currentError || !build) {
+  // Error loading record khi KHÔNG có attempt đang hoạt động
+  if ((currentError || !build) && !activeAttempt) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="p-8 rounded-3xl bg-white border border-slate-200 text-center space-y-4 shadow-xs">
@@ -642,8 +655,8 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     )
   }
 
-  // Empty build check
-  if (build.items.length === 0) {
+  // Empty build check khi KHÔNG có attempt đang hoạt động
+  if (build && build.items.length === 0 && !activeAttempt) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="p-8 rounded-3xl bg-white border border-slate-200 text-center space-y-4 shadow-xs">
@@ -676,7 +689,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       {/* Header & Breadcrumb */}
       <div className="space-y-3 pb-4 border-b border-slate-200">
         <Link
-          to={`/pc-builds/${build.id}`}
+          to={`/pc-builds/${buildId}`}
           className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-slate-600 hover:text-red-600 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
@@ -692,6 +705,31 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
           </p>
         </div>
       </div>
+
+      {/* Warning nếu load record ban đầu bị lỗi nhưng có active attempt */}
+      {currentError && activeAttempt && (
+        <div
+          role="alert"
+          className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+            <span>
+              Không thể tải lại chi tiết linh kiện mới nhất từ máy chủ, nhưng bạn vẫn có thể kiểm tra hoặc thử lại đơn hàng đang chờ bên dưới.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setLoadError(null)
+              setReloadTrigger((prev) => prev + 1)
+            }}
+            className="px-3 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-xl text-xs font-bold transition-colors flex-shrink-0"
+          >
+            Tải lại cấu hình
+          </button>
+        </div>
+      )}
 
       {/* Main 2-column layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -722,6 +760,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
         <div className="lg:col-span-5 xl:col-span-4">
           <BuyNowPCBuildSummary
             build={build}
+            buildId={buildId}
             currentTotal={currentTotal}
             paymentMethod={paymentMethod}
             isSubmitting={isSubmitting}
@@ -729,7 +768,8 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
             attemptStatus={activeAttempt?.status ?? 'idle'}
             unresolvedMessage={activeAttempt?.unresolvedMessage}
             knownOrder={activeAttempt?.knownOrder}
-            canSubmit={canSubmit}
+            canCreateNew={canCreate}
+            canReplay={canReplay || canRecover}
             onSubmit={handleBuyNowSubmit}
             onRetryStorageAndRedirect={handleRetryStorageAndRedirect}
           />
