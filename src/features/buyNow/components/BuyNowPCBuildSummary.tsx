@@ -20,12 +20,20 @@ import {
   Banknote,
   ShieldCheck,
   ExternalLink,
+  RotateCcw,
+  CheckCircle2,
+  ArrowRight,
 } from 'lucide-react'
 import type { MyPCBuild, MyPCBuildItem } from '../../pcBuilder/pcBuilderTypes'
 import { ComponentType } from '../../products/productTypes'
 import { COMPONENT_TYPE_LABELS, formatVnd } from '../../products/productConstants'
 import { getComponentStockDisplay } from '../../pcBuilder/pcBuilderStockHelper'
-import type { PaymentMethod } from '../../orders/orderTypes'
+import type {
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  PaymentActionDto,
+} from '../../orders/orderTypes'
 
 const SLOT_ICONS: Record<ComponentType, React.ElementType> = {
   [ComponentType.CPU]: Cpu,
@@ -62,14 +70,34 @@ const ItemThumbnail: React.FC<ItemThumbnailProps> = ({ url, alt }) => {
   )
 }
 
+export interface KnownOrderState {
+  id: string
+  orderNumber: string
+  status: OrderStatus
+  paymentStatus: PaymentStatus
+  paymentMethod: PaymentMethod
+  paymentAction: PaymentActionDto | null
+}
+
+export type AttemptStatus =
+  | 'idle'
+  | 'submitting'
+  | 'unresolved'
+  | 'stripe_storage_failed'
+  | 'stripe_redirect_failed'
+
 interface BuyNowPCBuildSummaryProps {
   build: MyPCBuild
   currentTotal: number
   paymentMethod: PaymentMethod
   isSubmitting?: boolean
   submitError?: string | null
+  attemptStatus?: AttemptStatus
+  unresolvedMessage?: string | null
+  knownOrder?: KnownOrderState | null
   canSubmit?: boolean
   onSubmit: () => void
+  onRetryStorageAndRedirect?: () => void
 }
 
 export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
@@ -78,9 +106,17 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
   paymentMethod,
   isSubmitting = false,
   submitError = null,
+  attemptStatus = 'idle',
+  unresolvedMessage = null,
+  knownOrder = null,
   canSubmit = true,
   onSubmit,
+  onRetryStorageAndRedirect,
 }) => {
+  const isUnresolved = attemptStatus === 'unresolved'
+  const isStripeStorageFailed = attemptStatus === 'stripe_storage_failed'
+  const isStripeRedirectFailed = attemptStatus === 'stripe_redirect_failed'
+
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6 sticky top-24">
       {/* Header */}
@@ -287,8 +323,87 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
         </p>
       </div>
 
-      {/* Submit Error Alert */}
-      {submitError && (
+      {/* Unresolved Attempt Warning Card */}
+      {isUnresolved && (
+        <div
+          role="alert"
+          className="p-4 bg-amber-50 border border-amber-300 rounded-2xl text-amber-950 text-xs space-y-3"
+        >
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-sm block">
+                Chưa thể xác nhận kết quả từ máy chủ
+              </span>
+              <p className="text-amber-800 leading-relaxed">
+                {unresolvedMessage ||
+                  'Kết nối mạng bị gián đoạn hoặc máy chủ phản hồi chậm. Đơn hàng của bạn có thể đã được khởi tạo thành công trên hệ thống.'}
+              </p>
+              <p className="text-amber-900 font-medium pt-0.5">
+                Bạn có thể bấm <strong>"Thử lại an toàn"</strong> để kiểm tra lại với cùng mã giao dịch này (hệ thống sẽ tự nhận diện và không tạo đơn trùng lặp), hoặc kiểm tra mục Đơn hàng của tôi.
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-1 flex items-center gap-2">
+            <Link
+              to="/orders"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-bold text-amber-900 hover:text-amber-950 underline text-xs"
+            >
+              <span>Kiểm tra danh sách Đơn hàng của tôi</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Known Order with Storage / Redirect Recovery */}
+      {knownOrder && (isStripeStorageFailed || isStripeRedirectFailed) && (
+        <div
+          role="status"
+          className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-950 text-xs space-y-3"
+        >
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold text-sm block">
+                Đơn hàng #{knownOrder.orderNumber} đã được tạo thành công!
+              </span>
+              <p className="text-emerald-800 leading-relaxed">
+                {isStripeStorageFailed
+                  ? 'Tuy nhiên trình duyệt đang chặn lưu trữ phiên thanh toán (sessionStorage). Để tiếp tục thanh toán, bạn có thể xem chi tiết đơn hàng hoặc thử lưu lại.'
+                  : 'Tuy nhiên kết nối chuyển hướng sang Stripe gặp sự cố hoặc phiên thanh toán đã hết hạn. Bạn có thể mở chi tiết đơn hàng để tiếp tục thanh toán.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            <Link
+              to={`/orders/${encodeURIComponent(knownOrder.id)}`}
+              className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <span>Xem chi tiết đơn #{knownOrder.orderNumber}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
+
+            {isStripeStorageFailed && onRetryStorageAndRedirect && (
+              <button
+                type="button"
+                onClick={onRetryStorageAndRedirect}
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 text-center"
+              >
+                Thử lưu lại và tiếp tục
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Standard Submit Error Alert (for definitive errors) */}
+      {submitError && !isUnresolved && !knownOrder && (
         <div
           role="alert"
           className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-rose-800 text-xs flex items-start gap-2"
@@ -307,12 +422,26 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
           type="button"
           disabled={!canSubmit || isSubmitting}
           onClick={onSubmit}
-          className="w-full py-4 px-6 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-md hover:shadow-lg disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          className={`w-full py-4 px-6 rounded-2xl text-xs sm:text-sm font-bold transition-all shadow-md hover:shadow-lg disabled:bg-slate-200 disabled:text-slate-400 disabled:shadow-none disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
+            isUnresolved
+              ? 'bg-amber-600 hover:bg-amber-700 text-white'
+              : 'bg-red-600 hover:bg-red-700 text-white'
+          }`}
         >
           {isSubmitting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
               <span>Đang xử lý đơn hàng...</span>
+            </>
+          ) : isUnresolved ? (
+            <>
+              <RotateCcw className="w-4 h-4" />
+              <span>Thử lại an toàn với mã giao dịch này</span>
+            </>
+          ) : isStripeRedirectFailed ? (
+            <>
+              <RotateCcw className="w-4 h-4" />
+              <span>Thử kết nối lại cổng Stripe</span>
             </>
           ) : (
             <span>

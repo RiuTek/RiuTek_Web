@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useBlocker } from 'react-router-dom'
 import {
   ArrowLeft,
   AlertTriangle,
@@ -19,7 +19,11 @@ import type { PaymentMethod } from '../features/orders/orderTypes'
 import type { BuyNowPCBuildRequest } from '../features/buyNow/buyNowTypes'
 import { CheckoutAddressSelector } from '../features/checkout/components/CheckoutAddressSelector'
 import { CheckoutPaymentSelector } from '../features/checkout/components/CheckoutPaymentSelector'
-import { BuyNowPCBuildSummary } from '../features/buyNow/components/BuyNowPCBuildSummary'
+import {
+  BuyNowPCBuildSummary,
+  type AttemptStatus,
+  type KnownOrderState,
+} from '../features/buyNow/components/BuyNowPCBuildSummary'
 import {
   CHECKOUT_ERROR_MESSAGES,
   MAX_NOTES_LENGTH,
@@ -31,6 +35,59 @@ import {
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export interface ActiveAttempt {
+  ownerId: string
+  buildId: string
+  idempotencyKey: string
+  requestPayload: BuyNowPCBuildRequest
+  status: AttemptStatus
+  knownOrder: KnownOrderState | null
+  unresolvedMessage: string | null
+}
+
+const getAttemptStorageKey = (ownerId: string, buildId: string) =>
+  `riutek:pc-build-buy-now-attempt:${ownerId}:${buildId}`
+
+function loadSavedAttempt(ownerId: string, buildId: string): ActiveAttempt | null {
+  try {
+    const raw = sessionStorage.getItem(getAttemptStorageKey(ownerId, buildId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ActiveAttempt
+    if (
+      parsed &&
+      parsed.ownerId === ownerId &&
+      parsed.buildId === buildId &&
+      typeof parsed.idempotencyKey === 'string' &&
+      parsed.idempotencyKey.length >= 16 &&
+      parsed.idempotencyKey.length <= 128 &&
+      parsed.requestPayload &&
+      typeof parsed.requestPayload.addressId === 'string'
+    ) {
+      return parsed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function persistSavedAttempt(
+  attempt: ActiveAttempt | null,
+  ownerId: string,
+  buildId: string
+): void {
+  try {
+    const key = getAttemptStorageKey(ownerId, buildId)
+    if (!attempt || attempt.status === 'idle') {
+      sessionStorage.removeItem(key)
+    } else {
+      sessionStorage.setItem(key, JSON.stringify(attempt))
+    }
+  } catch {
+    // Ignore sessionStorage errors
+  }
+}
 
 interface PCBuildBuyNowContentProps {
   buildId: string
@@ -64,34 +121,47 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
   const currentError = loadError?.key === currentQueryKey ? loadError : null
   const isLoadingRecord = loadedQueryKey !== currentQueryKey && currentError === null
 
-  // 2. Quản lý Address selection
+  // 2. Quản lý Attempt state machine (đóng băng khi unresolved hoặc có knownOrder)
+  const [activeAttempt, setActiveAttempt] = useState<ActiveAttempt | null>(() =>
+    loadSavedAttempt(ownerId, buildId)
+  )
+
+  // 3. Quản lý Address selection (khóa theo attempt snapshot nếu attempt đang hoạt động)
   const [userSelectedAddressId, setUserSelectedAddressId] = useState<string | null>(null)
 
   const selectedAddressId = useMemo(() => {
+    if (activeAttempt?.requestPayload?.addressId) {
+      return activeAttempt.requestPayload.addressId
+    }
     if (addresses.length === 0) return null
     if (userSelectedAddressId && addresses.some((a) => a.id === userSelectedAddressId)) {
       return userSelectedAddressId
     }
     const defaultAddr = addresses.find((a) => a.isDefault) ?? addresses[0]
     return defaultAddr ? defaultAddr.id : null
-  }, [addresses, userSelectedAddressId])
+  }, [activeAttempt, addresses, userSelectedAddressId])
 
-  // 3. Quản lý Payment Method & Notes
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('COD')
-  const [notes, setNotes] = useState('')
+  // 4. Quản lý Payment Method & Notes (khóa theo attempt snapshot nếu attempt đang hoạt động)
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(() =>
+    activeAttempt?.requestPayload?.paymentMethod ?? 'COD'
+  )
+  const [notes, setNotes] = useState(() => activeAttempt?.requestPayload?.notes ?? '')
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // 4. Sequence & Lifecycle refs
+  // Khóa tương tác khi request đang gửi hoặc attempt chưa rõ kết quả / đang chờ xử lý
+  const isInputLocked =
+    isSubmitting ||
+    (activeAttempt !== null &&
+      activeAttempt.status !== 'idle')
+
+  // 5. Sequence & Lifecycle refs
   const isMountedRef = useRef(true)
   const userRef = useRef(user)
   const buildIdRef = useRef(buildId)
   const recordSeqRef = useRef(0)
   const submitSeqRef = useRef(0)
-
-  // 5. Idempotency tracking refs
-  const idempotencyKeyRef = useRef<string | null>(null)
-  const lastFingerprintRef = useRef<string | null>(null)
 
   useEffect(() => {
     isMountedRef.current = true
@@ -104,6 +174,32 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
     userRef.current = user
     buildIdRef.current = buildId
   }, [user, buildId])
+
+  // Đồng bộ activeAttempt vào sessionStorage khi thay đổi
+  useEffect(() => {
+    persistSavedAttempt(activeAttempt, ownerId, buildId)
+  }, [activeAttempt, ownerId, buildId])
+
+  // 6. Navigation protection khi attempt ở trạng thái chưa rõ kết quả hoặc có knownOrder chưa xử lý xong
+  const isNavigationBlocked =
+    activeAttempt !== null &&
+    (activeAttempt.status === 'unresolved' ||
+      activeAttempt.status === 'stripe_storage_failed' ||
+      activeAttempt.status === 'stripe_redirect_failed')
+
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      isNavigationBlocked && currentLocation.pathname !== nextLocation.pathname
+  )
+
+  useEffect(() => {
+    if (!isNavigationBlocked) return
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isNavigationBlocked])
 
   // Tải dữ liệu cấu hình PC từ server
   useEffect(() => {
@@ -210,25 +306,36 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       buildIdRef.current === buildId &&
       submitSeqRef.current === submitSeq
 
-    // Idempotency Policy:
-    // Fingerprint kết hợp: ownerId + buildId + addressId + paymentMethod + cleanNotes + items
-    const itemsFingerprint = build.items
-      .map((i) => `${i.productId}:${i.quantity}:${i.currentPrice}`)
-      .sort()
-      .join(';')
-    const currentFingerprint = `${user.id}:${build.id}:${selectedAddressId}:${paymentMethod}:${cleanNotes}:${itemsFingerprint}`
+    // Quản lý Attempt & Snapshot:
+    // Nếu attempt hiện tại đang unresolved hoặc stripe_redirect_failed:
+    // TÁI SỬ DỤNG chính xác key và requestPayload snapshot ban đầu!
+    let attemptKey: string
+    let attemptPayload: BuyNowPCBuildRequest
 
-    let idempotencyKey = idempotencyKeyRef.current
-    if (!idempotencyKey || lastFingerprintRef.current !== currentFingerprint) {
-      idempotencyKey = crypto.randomUUID()
-      idempotencyKeyRef.current = idempotencyKey
-      lastFingerprintRef.current = currentFingerprint
-    }
-
-    const requestPayload: BuyNowPCBuildRequest = {
-      addressId: selectedAddressId,
-      paymentMethod,
-      notes: cleanNotes.length > 0 ? cleanNotes : null,
+    if (
+      activeAttempt &&
+      (activeAttempt.status === 'unresolved' ||
+        activeAttempt.status === 'stripe_redirect_failed')
+    ) {
+      attemptKey = activeAttempt.idempotencyKey
+      attemptPayload = activeAttempt.requestPayload
+    } else {
+      attemptKey = crypto.randomUUID()
+      attemptPayload = {
+        addressId: selectedAddressId,
+        paymentMethod,
+        notes: cleanNotes.length > 0 ? cleanNotes : null,
+      }
+      const newAttempt: ActiveAttempt = {
+        ownerId,
+        buildId,
+        idempotencyKey: attemptKey,
+        requestPayload: attemptPayload,
+        status: 'submitting',
+        knownOrder: null,
+        unresolvedMessage: null,
+      }
+      setActiveAttempt(newAttempt)
     }
 
     setIsSubmitting(true)
@@ -240,7 +347,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
       if (!token) throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.')
 
       const executeBuy = async (authToken: string) => {
-        return buyNowPCBuild(build.id, requestPayload, idempotencyKey!, authToken)
+        return buyNowPCBuild(build.id, attemptPayload, attemptKey, authToken)
       }
 
       let order
@@ -260,84 +367,222 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
 
       if (!isContextCurrent()) return
 
-      if (paymentMethod === 'COD') {
-        // Đặt hàng COD thành công: giải phóng attempt và điều hướng đến trang hoàn tất
-        idempotencyKeyRef.current = null
-        lastFingerprintRef.current = null
-        // Giỏ hàng hiện tại được bảo toàn nguyên vẹn
+      // BƯỚC QUAN TRỌNG: Ngay khi nhận CheckoutOrderDto, giữ order details vào state attempt trước khi validate URL hoặc storage
+      const known: KnownOrderState = {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        paymentAction: order.paymentAction,
+      }
+
+      if (order.paymentMethod === 'COD') {
+        // Đặt hàng COD thành công: xóa attempt khỏi storage và điều hướng
+        setActiveAttempt(null)
+        persistSavedAttempt(null, ownerId, buildId)
         navigate(`/checkout/success?orderId=${encodeURIComponent(order.id)}`)
         return
       }
 
-      if (paymentMethod === 'Stripe') {
-        const action = order.paymentAction
-        if (
-          action?.type === 'Redirect' &&
-          action.url &&
-          validateStripeRedirectUrl(action.url)
-        ) {
-          // Lưu pending Stripe metadata trước khi chuyển hướng sang Stripe
-          savePendingStripeCheckout({
-            source: 'pc-build',
-            userId: user.id,
-            orderId: order.id,
-            orderNumber: order.orderNumber,
-            idempotencyKey: idempotencyKey!,
-            addressId: selectedAddressId,
-            buildId: build.id,
-          })
-
-          // Giỏ hàng hiện tại được bảo toàn nguyên vẹn
-          window.location.assign(action.url)
+      if (order.paymentMethod === 'Stripe') {
+        // Replay check: nếu đơn hàng đã được thanh toán hoặc không còn ở trạng thái PendingPayment
+        if (order.paymentStatus === 'Completed' || order.status !== 'PendingPayment') {
+          setActiveAttempt(null)
+          persistSavedAttempt(null, ownerId, buildId)
+          navigate(`/checkout/success?orderId=${encodeURIComponent(order.id)}`)
           return
         }
 
-        setSubmitError(
-          'Không thể khởi tạo cổng thanh toán Stripe an toàn. Vui lòng thử lại.'
-        )
+        const action = order.paymentAction
+        if (
+          !action ||
+          action.type !== 'Redirect' ||
+          !action.url ||
+          !validateStripeRedirectUrl(action.url)
+        ) {
+          const failedAttempt: ActiveAttempt = {
+            ownerId,
+            buildId,
+            idempotencyKey: attemptKey,
+            requestPayload: attemptPayload,
+            status: 'stripe_redirect_failed',
+            knownOrder: known,
+            unresolvedMessage:
+              'Liên kết thanh toán Stripe từ máy chủ không hợp lệ hoặc đã hết hạn.',
+          }
+          setActiveAttempt(failedAttempt)
+          setSubmitError(
+            'Liên kết thanh toán Stripe không hợp lệ hoặc đã hết hạn. Đơn hàng của bạn đã được lưu trên hệ thống, bạn có thể xem chi tiết đơn để tiếp tục.'
+          )
+          return
+        }
+
+        // Lưu pending Stripe metadata trước khi chuyển hướng sang Stripe
+        const saved = savePendingStripeCheckout({
+          source: 'pc-build',
+          userId: user.id,
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          idempotencyKey: attemptKey,
+          addressId: attemptPayload.addressId,
+          buildId: build.id,
+        })
+
+        if (!saved) {
+          // Trình duyệt chặn sessionStorage -> KHÔNG redirect mù
+          const storageFailedAttempt: ActiveAttempt = {
+            ownerId,
+            buildId,
+            idempotencyKey: attemptKey,
+            requestPayload: attemptPayload,
+            status: 'stripe_storage_failed',
+            knownOrder: known,
+            unresolvedMessage:
+              'Trình duyệt đang chặn lưu trữ phiên thanh toán (sessionStorage).',
+          }
+          setActiveAttempt(storageFailedAttempt)
+          setSubmitError(
+            'Trình duyệt đang chặn lưu trữ phiên thanh toán tạm thời. Đơn hàng đã được tạo thành công, bạn có thể mở chi tiết đơn hàng để tiếp tục thanh toán.'
+          )
+          return
+        }
+
+        // Redirect sang cổng Stripe
+        try {
+          window.location.assign(action.url)
+          return
+        } catch (redirectErr) {
+          const redirectFailedAttempt: ActiveAttempt = {
+            ownerId,
+            buildId,
+            idempotencyKey: attemptKey,
+            requestPayload: attemptPayload,
+            status: 'stripe_redirect_failed',
+            knownOrder: known,
+            unresolvedMessage:
+              redirectErr instanceof Error
+                ? redirectErr.message
+                : 'Không thể chuyển hướng sang Stripe.',
+          }
+          setActiveAttempt(redirectFailedAttempt)
+          setSubmitError(
+            'Không thể chuyển hướng sang Stripe. Đơn hàng đã được lưu an toàn, vui lòng mở chi tiết đơn hàng.'
+          )
+          return
+        }
       }
     } catch (err: unknown) {
       if (!isContextCurrent()) return
 
+      // Phân loại lỗi theo Backend contract:
+      // 1. Lỗi nghiệp vụ dứt khoát TRƯỚC MUTATION: chắc chắn chưa tạo đơn trong DB
+      // 2. Lỗi mạng / timeout / 5xx / lỗi cổng thanh toán: KẾT QUẢ CHƯA XÁC ĐỊNH -> ĐÓNG BĂNG ATTEMPT
       if (err instanceof ApiError) {
-        if (err.code && CHECKOUT_ERROR_MESSAGES[err.code]) {
-          setSubmitError(CHECKOUT_ERROR_MESSAGES[err.code])
-        } else if (err.code === 'PCBuild.NotFound') {
-          setSubmitError('Không tìm thấy cấu hình này trên máy chủ.')
-        } else if (err.code === 'PCBuild.EmptyBuild') {
-          setSubmitError('Cấu hình PC không có linh kiện nào để đặt mua.')
-        } else if (err.description) {
-          setSubmitError(err.description)
-        } else {
-          setSubmitError(err.message || 'Không thể đặt mua cấu hình PC lúc này.')
-        }
-
-        // Tải lại sổ địa chỉ nếu địa chỉ không tồn tại
-        if (err.code === 'Checkout.AddressNotFound') {
-          loadAddresses().catch(() => {})
-        }
-
-        // Với các lỗi business xác định không tạo order và không thể replay, xoay key mới
-        if (
-          err.code === 'Checkout.ProductInactive' ||
+        const isDefinitivePreMutation =
+          err.code === 'PCBuild.NotFound' ||
+          err.code === 'PCBuild.EmptyBuild' ||
+          err.code === 'Checkout.AddressNotFound' ||
+          err.code === 'Checkout.ProductNotFound' ||
+          err.code === 'Checkout.PaymentMethodNotAvailable' ||
           err.code === 'Checkout.InsufficientStock' ||
-          err.code === 'Checkout.InventoryChanged' ||
+          err.code === 'Checkout.ProductInactive' ||
           err.code === 'Checkout.InvalidPrice' ||
-          err.code === 'PCBuild.EmptyBuild'
-        ) {
-          idempotencyKeyRef.current = null
-          lastFingerprintRef.current = null
+          err.status === 400 ||
+          err.status === 403 ||
+          err.status === 404
+
+        if (isDefinitivePreMutation) {
+          // Chưa có đơn trong DB: mở lại form và xóa attempt
+          setActiveAttempt(null)
+          persistSavedAttempt(null, ownerId, buildId)
+
+          let msg = 'Không thể đặt mua cấu hình PC lúc này.'
+          if (err.code && CHECKOUT_ERROR_MESSAGES[err.code]) {
+            msg = CHECKOUT_ERROR_MESSAGES[err.code]
+          } else if (err.code === 'PCBuild.NotFound') {
+            msg = 'Không tìm thấy cấu hình này trên máy chủ.'
+          } else if (err.code === 'PCBuild.EmptyBuild') {
+            msg = 'Cấu hình PC không có linh kiện nào để đặt mua.'
+          } else if (err.description) {
+            msg = err.description
+          } else if (err.message) {
+            msg = err.message
+          }
+          setSubmitError(msg)
+
+          if (err.code === 'Checkout.AddressNotFound') {
+            loadAddresses().catch(() => {})
+          }
+          return
         }
-        // Đối với lỗi mạng / timeout / không rõ kết quả: giữ nguyên idempotencyKeyRef để retry an toàn
-      } else if (err instanceof Error) {
-        setSubmitError(err.message)
+
+        // Lỗi 5xx hoặc Gateway: có thể đã tạo Order trong DB
+        const unresolvedMsg =
+          (err.code && CHECKOUT_ERROR_MESSAGES[err.code]) ||
+          err.description ||
+          err.message ||
+          'Chưa thể xác nhận kết quả từ máy chủ do lỗi kết nối hoặc phản hồi chậm.'
+
+        const unresolvedAttempt: ActiveAttempt = {
+          ownerId,
+          buildId,
+          idempotencyKey: attemptKey,
+          requestPayload: attemptPayload,
+          status: 'unresolved',
+          knownOrder: null,
+          unresolvedMessage: unresolvedMsg,
+        }
+        setActiveAttempt(unresolvedAttempt)
+        setSubmitError(unresolvedMsg)
       } else {
-        setSubmitError('Đã xảy ra lỗi không xác định. Vui lòng thử lại.')
+        // Lỗi mạng / TypeError / timeout: chuyển attempt sang UNRESOLVED
+        const networkMsg =
+          err instanceof Error
+            ? err.message
+            : 'Mất kết nối với máy chủ. Vui lòng kiểm tra lại kết nối mạng.'
+
+        const unresolvedAttempt: ActiveAttempt = {
+          ownerId,
+          buildId,
+          idempotencyKey: attemptKey,
+          requestPayload: attemptPayload,
+          status: 'unresolved',
+          knownOrder: null,
+          unresolvedMessage: networkMsg,
+        }
+        setActiveAttempt(unresolvedAttempt)
+        setSubmitError(networkMsg)
       }
     } finally {
       if (isContextCurrent()) {
         setIsSubmitting(false)
       }
+    }
+  }
+
+  // Thử lưu lại pending Stripe và chuyển hướng
+  const handleRetryStorageAndRedirect = () => {
+    if (!activeAttempt?.knownOrder?.paymentAction?.url || !user?.id) return
+    const url = activeAttempt.knownOrder.paymentAction.url
+    if (!validateStripeRedirectUrl(url)) return
+
+    const saved = savePendingStripeCheckout({
+      source: 'pc-build',
+      userId: user.id,
+      orderId: activeAttempt.knownOrder.id,
+      orderNumber: activeAttempt.knownOrder.orderNumber,
+      idempotencyKey: activeAttempt.idempotencyKey,
+      addressId: activeAttempt.requestPayload.addressId,
+      buildId: buildId,
+    })
+
+    if (saved) {
+      window.location.assign(url)
+    } else {
+      setSubmitError(
+        'Trình duyệt vẫn đang chặn lưu trữ sessionStorage. Vui lòng kiểm tra cài đặt trình duyệt hoặc mở chi tiết đơn hàng để thanh toán.'
+      )
     }
   }
 
@@ -461,6 +706,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
             onRetry={() => {
               loadAddresses().catch(() => {})
             }}
+            disabled={isInputLocked}
           />
 
           <CheckoutPaymentSelector
@@ -468,7 +714,7 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
             onChangePaymentMethod={setPaymentMethod}
             notes={notes}
             onChangeNotes={setNotes}
-            disabled={isSubmitting}
+            disabled={isInputLocked}
           />
         </div>
 
@@ -480,11 +726,64 @@ const PCBuildBuyNowContent: React.FC<PCBuildBuyNowContentProps> = ({
             paymentMethod={paymentMethod}
             isSubmitting={isSubmitting}
             submitError={submitError}
+            attemptStatus={activeAttempt?.status ?? 'idle'}
+            unresolvedMessage={activeAttempt?.unresolvedMessage}
+            knownOrder={activeAttempt?.knownOrder}
             canSubmit={canSubmit}
             onSubmit={handleBuyNowSubmit}
+            onRetryStorageAndRedirect={handleRetryStorageAndRedirect}
           />
         </div>
       </div>
+
+      {/* Navigation Blocker Modal when attempt is unresolved / knownOrder pending */}
+      {blocker.state === 'blocked' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-leave-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <h3
+                  id="confirm-leave-title"
+                  className="text-base font-bold text-slate-900"
+                >
+                  Xác nhận rời khỏi trang
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Giao dịch đặt mua cấu hình của bạn hiện chưa xác định xong kết quả từ máy chủ hoặc đơn hàng vừa được tạo.
+                </p>
+                <p className="text-xs text-amber-800 font-medium">
+                  Nếu tiếp tục rời trang, vui lòng kiểm tra danh sách <strong>"Đơn hàng của tôi"</strong> trước khi đặt mua lại để tránh bị tạo 2 đơn.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => blocker.reset()}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+              >
+                Ở lại trang này
+              </button>
+              <button
+                type="button"
+                onClick={() => blocker.proceed()}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+              >
+                Rời khỏi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

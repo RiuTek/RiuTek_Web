@@ -54,8 +54,9 @@ export function validateStripeRedirectUrl(urlStr: string): boolean {
 /**
  * Lưu pending Stripe checkout metadata vào sessionStorage theo schema version 2.
  * TUYỆT ĐỐI không lưu token, PII, giỏ hàng hay ghi chú.
+ * Trả về true nếu ghi thành công, false nếu sessionStorage bị chặn hoặc throw.
  */
-export function savePendingStripeCheckout(data: SavePendingStripeData): void {
+export function savePendingStripeCheckout(data: SavePendingStripeData): boolean {
   try {
     let payload: PendingStripeCheckout
     if (data.source === 'cart') {
@@ -97,8 +98,10 @@ export function savePendingStripeCheckout(data: SavePendingStripeData): void {
       }
     }
     sessionStorage.setItem(PENDING_STRIPE_STORAGE_KEY, JSON.stringify(payload))
+    return true
   } catch {
     // sessionStorage có thể bị chặn ở incognito mode hoặc quota exceeded
+    return false
   }
 }
 

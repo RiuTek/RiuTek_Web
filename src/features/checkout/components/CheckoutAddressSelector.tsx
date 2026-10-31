@@ -19,6 +19,7 @@ interface CheckoutAddressSelectorProps {
   isLoading: boolean
   error: string | null
   onRetry: () => void
+  disabled?: boolean
 }
 
 export const CheckoutAddressSelector: React.FC<CheckoutAddressSelectorProps> = ({
@@ -28,6 +29,7 @@ export const CheckoutAddressSelector: React.FC<CheckoutAddressSelectorProps> = (
   isLoading,
   error,
   onRetry,
+  disabled = false,
 }) => {
   return (
     <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-4">
@@ -111,7 +113,9 @@ export const CheckoutAddressSelector: React.FC<CheckoutAddressSelectorProps> = (
             return (
               <label
                 key={address.id}
-                className={`flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${
+                className={`flex items-start gap-3 p-4 rounded-2xl border transition-all ${
+                  disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                } ${
                   isSelected
                     ? 'border-red-500 bg-red-50/30 ring-1 ring-red-500'
                     : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -121,7 +125,12 @@ export const CheckoutAddressSelector: React.FC<CheckoutAddressSelectorProps> = (
                   type="radio"
                   name="checkout-address"
                   checked={isSelected}
-                  onChange={() => onSelectAddress(address.id)}
+                  disabled={disabled}
+                  onChange={() => {
+                    if (!disabled) {
+                      onSelectAddress(address.id)
+                    }
+                  }}
                   className="mt-1 text-red-600 focus:ring-red-500"
                 />
 
