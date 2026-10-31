@@ -1,6 +1,6 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, ShoppingBag } from 'lucide-react'
+import { ArrowLeft, ShoppingBag, AlertTriangle } from 'lucide-react'
 import { useCartCheckout } from '../features/checkout/useCartCheckout'
 import { CheckoutAddressSelector } from '../features/checkout/components/CheckoutAddressSelector'
 import { CheckoutPaymentSelector } from '../features/checkout/components/CheckoutPaymentSelector'
@@ -9,6 +9,11 @@ import { CheckoutOrderSummary } from '../features/checkout/components/CheckoutOr
 export const CheckoutPage: React.FC = () => {
   const {
     cart,
+    selectedProductIds,
+    activeAttempt,
+    canCreate,
+    canReplay,
+    blocker,
     addresses,
     addressStatus,
     addressError,
@@ -26,6 +31,7 @@ export const CheckoutPage: React.FC = () => {
     isSubmitting,
     submitError,
     handleCheckout,
+    handleRetryStorageAndRedirect,
   } = useCartCheckout()
 
   const handleRetryAddresses = () => {
@@ -34,8 +40,8 @@ export const CheckoutPage: React.FC = () => {
     })
   }
 
-  // Nếu giỏ hàng rỗng, hiển thị empty state
-  if (cart && cart.items.length === 0) {
+  // 1. Nếu không có active attempt và giỏ hàng rỗng
+  if (!activeAttempt && cart && cart.items.length === 0) {
     return (
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-6">
         <div className="w-16 h-16 rounded-3xl bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
@@ -62,6 +68,34 @@ export const CheckoutPage: React.FC = () => {
     )
   }
 
+  // 2. Nếu không có active attempt và không có sản phẩm nào được chọn
+  if (!activeAttempt && selectedProductIds.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 text-center space-y-6">
+        <div className="w-16 h-16 rounded-3xl bg-amber-50 flex items-center justify-center mx-auto text-amber-600">
+          <ShoppingBag className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-xl sm:text-2xl font-black text-slate-950">
+            Chưa Chọn Sản Phẩm Nào Để Thanh Toán
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-600 max-w-md mx-auto">
+            Bạn chưa chọn sản phẩm nào từ giỏ hàng để tiến hành thanh toán. Hãy quay lại giỏ hàng và chọn các món bạn muốn mua nhé!
+          </p>
+        </div>
+        <div>
+          <Link
+            to="/cart"
+            className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-xs sm:text-sm font-bold transition-colors shadow-sm"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            <span>Quay Lại Giỏ Hàng</span>
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Page Header & Breadcrumbs */}
@@ -77,7 +111,7 @@ export const CheckoutPage: React.FC = () => {
           Xác Nhận & Đặt Hàng
         </h1>
         <p className="text-xs sm:text-sm text-slate-600">
-          Vui lòng kiểm tra địa chỉ nhận hàng, phương thức thanh toán và danh mục linh kiện.
+          Vui lòng kiểm tra địa chỉ nhận hàng, phương thức thanh toán và danh mục linh kiện đã chọn ({selectedProductIds.length} sản phẩm).
         </p>
       </div>
 
@@ -99,7 +133,7 @@ export const CheckoutPage: React.FC = () => {
             onChangePaymentMethod={setPaymentMethod}
             notes={notes}
             onChangeNotes={setNotes}
-            disabled={isSubmitting}
+            disabled={isSubmitting || Boolean(activeAttempt)}
           />
         </div>
 
@@ -112,13 +146,69 @@ export const CheckoutPage: React.FC = () => {
             hasAddress={selectedAddressId !== null}
             isSubmitting={isSubmitting}
             submitError={submitError}
+            attemptStatus={activeAttempt?.status ?? 'idle'}
+            unresolvedMessage={activeAttempt?.unresolvedMessage}
+            knownOrder={activeAttempt?.knownOrder}
+            paymentMethod={paymentMethod}
+            canCreateNew={canCreate}
+            canReplay={canReplay}
             onSubmit={async () => {
               await handleCheckout()
             }}
             onRetryQuote={refetchQuote}
+            onRetryStorageAndRedirect={handleRetryStorageAndRedirect}
           />
         </div>
       </div>
+
+      {/* Blocker Modal when attempt is active/unresolved */}
+      {blocker.state === 'blocked' && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-leave-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-150"
+        >
+          <div className="bg-white rounded-3xl p-6 sm:p-7 max-w-md w-full shadow-2xl border border-slate-100 space-y-5">
+            <div className="flex items-start gap-3.5">
+              <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div className="space-y-1.5 flex-1 min-w-0">
+                <h3
+                  id="confirm-leave-title"
+                  className="text-base font-bold text-slate-900"
+                >
+                  Xác nhận rời khỏi trang
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+                  Giao dịch đặt hàng của bạn hiện chưa xác định xong kết quả từ máy chủ hoặc đơn hàng đang được xử lý.
+                </p>
+                <p className="text-xs text-amber-800 font-medium">
+                  Nếu tiếp tục rời trang, vui lòng kiểm tra danh sách <strong>"Đơn hàng của tôi"</strong> trước khi đặt mua lại để tránh bị tạo 2 đơn.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => blocker.reset()}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+              >
+                Ở lại trang này
+              </button>
+              <button
+                type="button"
+                onClick={() => blocker.proceed()}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+              >
+                Rời khỏi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

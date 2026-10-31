@@ -5,6 +5,9 @@ import {
 } from './checkoutConstants'
 import type { PendingStripeCheckout } from './checkoutTypes'
 
+export const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 export type SavePendingStripeData =
   | {
       source: 'cart'
@@ -14,6 +17,7 @@ export type SavePendingStripeData =
       idempotencyKey: string
       addressId: string
       expectedCartVersion: number
+      selectedProductIds?: string[]
     }
   | {
       source: 'product'
@@ -69,6 +73,7 @@ export function savePendingStripeCheckout(data: SavePendingStripeData): boolean 
         idempotencyKey: data.idempotencyKey,
         addressId: data.addressId,
         expectedCartVersion: data.expectedCartVersion,
+        ...(data.selectedProductIds ? { selectedProductIds: data.selectedProductIds } : {}),
         createdAt: new Date().toISOString(),
       }
     } else if (data.source === 'product') {
@@ -215,6 +220,36 @@ export function getPendingStripeCheckout(
           return null
         }
 
+        let validatedSelectedProductIds: string[] | undefined = undefined
+        if (parsed.selectedProductIds !== undefined) {
+          if (
+            !Array.isArray(parsed.selectedProductIds) ||
+            parsed.selectedProductIds.length === 0 ||
+            parsed.selectedProductIds.length > 50
+          ) {
+            clearPendingStripeCheckout()
+            return null
+          }
+          const seen = new Set<string>()
+          for (const id of parsed.selectedProductIds) {
+            if (
+              typeof id !== 'string' ||
+              !UUID_REGEX.test(id) ||
+              id === '00000000-0000-0000-0000-000000000000'
+            ) {
+              clearPendingStripeCheckout()
+              return null
+            }
+            const lower = id.toLowerCase()
+            if (seen.has(lower)) {
+              clearPendingStripeCheckout()
+              return null
+            }
+            seen.add(lower)
+          }
+          validatedSelectedProductIds = parsed.selectedProductIds as string[]
+        }
+
         return {
           version: 2,
           source: 'cart',
@@ -224,6 +259,9 @@ export function getPendingStripeCheckout(
           idempotencyKey: parsed.idempotencyKey.trim(),
           addressId: parsed.addressId,
           expectedCartVersion: parsed.expectedCartVersion,
+          ...(validatedSelectedProductIds
+            ? { selectedProductIds: validatedSelectedProductIds }
+            : {}),
           createdAt: parsed.createdAt,
         }
       }

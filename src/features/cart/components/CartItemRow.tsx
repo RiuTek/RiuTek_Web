@@ -7,6 +7,8 @@ import { getCartIssueLabel, type CartItemDto } from '../cartTypes'
 interface CartItemRowProps {
   item: CartItemDto
   isMutating: boolean
+  isSelected: boolean
+  onToggleSelect: (productId: string) => void
   onUpdateQuantity: (productId: string, quantity: number) => Promise<void>
   onRemove: (productId: string) => Promise<void>
 }
@@ -14,6 +16,8 @@ interface CartItemRowProps {
 export const CartItemRow: React.FC<CartItemRowProps> = ({
   item,
   isMutating,
+  isSelected,
+  onToggleSelect,
   onUpdateQuantity,
   onRemove,
 }) => {
@@ -68,6 +72,19 @@ export const CartItemRow: React.FC<CartItemRowProps> = ({
       }`}
     >
       <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+        {/* Selection Checkbox */}
+        <div className="flex items-center sm:self-center flex-shrink-0">
+          <input
+            type="checkbox"
+            id={`cart-item-select-${item.productId}`}
+            checked={isSelected}
+            disabled={!item.canPurchase || isMutating}
+            onChange={() => onToggleSelect(item.productId)}
+            aria-label={`Chọn sản phẩm ${item.name} để thanh toán`}
+            className="w-5 h-5 rounded border-slate-300 text-red-600 focus:ring-red-500 focus:ring-offset-0 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+          />
+        </div>
+
         {/* Product Image */}
         <div className="w-20 h-20 sm:w-24 sm:h-24 bg-slate-100 rounded-xl overflow-hidden flex-shrink-0 flex items-center justify-center border border-slate-200 relative">
           {item.imageUrl && !imageError ? (

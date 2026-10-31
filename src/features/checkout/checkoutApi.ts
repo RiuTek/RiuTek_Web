@@ -15,9 +15,13 @@ export { getMyOrderById } from '../orders/orderApi'
 export function getCheckoutQuote(
   addressId: string,
   token: string,
+  selectedProductIds?: string[],
   signal?: AbortSignal
 ): Promise<CheckoutQuoteDto> {
-  const body: GetCheckoutQuoteRequest = { addressId }
+  const body: GetCheckoutQuoteRequest = {
+    addressId,
+    ...(selectedProductIds ? { selectedProductIds } : {}),
+  }
   return apiClient.post<CheckoutQuoteDto>('/orders/checkout/quote', body, {
     token,
     signal,

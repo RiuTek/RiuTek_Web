@@ -24,10 +24,23 @@ export const CartPage: React.FC = () => {
     setQuantity,
     removeItem,
     clearCart,
+    toggleSelectProduct,
+    toggleSelectAll,
+    isProductSelected,
+    selectedTotals,
+    prunedNotification,
+    clearPrunedNotification,
   } = useCart()
 
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const selectAllInputRef = React.useRef<HTMLInputElement>(null)
+
+  React.useEffect(() => {
+    if (selectAllInputRef.current) {
+      selectAllInputRef.current.indeterminate = selectedTotals.isIndeterminate
+    }
+  }, [selectedTotals.isIndeterminate])
 
   const handleRetryLoad = async () => {
     try {
@@ -197,6 +210,26 @@ export const CartPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Pruned Notification Alert */}
+      {prunedNotification && (
+        <div
+          role="status"
+          className="p-4 bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm rounded-2xl flex items-center justify-between gap-3 shadow-xs"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <span>{prunedNotification}</span>
+          </div>
+          <button
+            type="button"
+            onClick={clearPrunedNotification}
+            className="text-xs font-bold text-amber-800 hover:underline"
+          >
+            Đóng
+          </button>
+        </div>
+      )}
+
       {/* Action / Conflict Error Alert */}
       {actionError && (
         <div
@@ -221,11 +254,36 @@ export const CartPage: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* Items Column */}
         <div className="lg:col-span-8 space-y-3">
+          {/* Select All Bar */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-white border border-slate-200 flex items-center justify-between shadow-xs">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <input
+                ref={selectAllInputRef}
+                type="checkbox"
+                checked={selectedTotals.isAllSelected}
+                disabled={isMutating || cart.items.filter((i) => i.canPurchase).length === 0}
+                onChange={toggleSelectAll}
+                aria-label="Chọn tất cả sản phẩm có thể mua"
+                className="w-5 h-5 rounded border-slate-300 text-red-600 focus:ring-red-500 focus:ring-offset-0 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+              />
+              <span className="text-xs sm:text-sm font-bold text-slate-900">
+                Chọn tất cả ({cart.items.filter((i) => i.canPurchase).length} sản phẩm khả dụng)
+              </span>
+            </label>
+            {selectedTotals.selectedLineCount > 0 && (
+              <span className="text-xs font-semibold text-slate-500">
+                Đã chọn {selectedTotals.selectedLineCount} dòng / {selectedTotals.selectedItemCount} sản phẩm
+              </span>
+            )}
+          </div>
+
           {cart.items.map((item) => (
             <CartItemRow
               key={item.productId}
               item={item}
               isMutating={isMutating}
+              isSelected={isProductSelected(item.productId)}
+              onToggleSelect={toggleSelectProduct}
               onUpdateQuantity={handleUpdateQuantity}
               onRemove={handleRemoveItem}
             />
@@ -252,13 +310,15 @@ export const CartPage: React.FC = () => {
 
             <div className="space-y-3 text-xs sm:text-sm">
               <div className="flex items-center justify-between text-slate-600">
-                <span>Số lượng sản phẩm:</span>
-                <span className="font-semibold text-slate-900">{itemCount}</span>
+                <span>Đã chọn:</span>
+                <span className="font-semibold text-slate-900">
+                  {selectedTotals.selectedLineCount} dòng / {selectedTotals.selectedItemCount} sản phẩm
+                </span>
               </div>
               <div className="flex items-center justify-between text-slate-600">
-                <span>Tạm tính ({cart.items.length} mặt hàng):</span>
+                <span>Tạm tính các món đã chọn:</span>
                 <span className="font-bold text-slate-900">
-                  {formatVnd(cart.subtotal)}
+                  {formatVnd(selectedTotals.selectedSubtotal)}
                 </span>
               </div>
             </div>
@@ -266,43 +326,51 @@ export const CartPage: React.FC = () => {
             <div className="pt-4 border-t border-slate-100 flex items-baseline justify-between">
               <div>
                 <span className="text-sm font-extrabold text-slate-950">Tổng tiền</span>
-                <p className="text-[10px] text-slate-400">Tạm tính theo giá hiện tại</p>
+                <p className="text-[10px] text-slate-400">Tạm tính theo các sản phẩm đã chọn</p>
               </div>
               <span className="text-xl sm:text-2xl font-black text-red-600">
-                {formatVnd(cart.subtotal)}
+                {formatVnd(selectedTotals.selectedSubtotal)}
               </span>
             </div>
 
-            {/* Warning if cannot checkout */}
-            {!cart.canCheckout ? (
+            {/* Warning if no selection or error */}
+            {selectedTotals.selectedLineCount === 0 ? (
+              <div
+                role="status"
+                className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-600 text-xs flex items-center gap-2"
+              >
+                <Package className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <span>Vui lòng chọn ít nhất 1 sản phẩm để tiến hành thanh toán.</span>
+              </div>
+            ) : !selectedTotals.canCheckoutSelected ? (
               <div
                 role="alert"
                 className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs space-y-1"
               >
                 <div className="flex items-center gap-1.5 font-bold">
                   <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                  <span>Chưa thể thanh toán</span>
+                  <span>Chưa thể thanh toán lựa chọn này</span>
                 </div>
                 <p className="text-[11px] leading-relaxed">
-                  Một hoặc nhiều sản phẩm trong giỏ hàng hiện hết hàng hoặc ngừng kinh doanh. Vui lòng loại bỏ hoặc điều chỉnh số lượng để tiếp tục.
+                  Một trong các sản phẩm bạn chọn hiện không đủ điều kiện mua. Vui lòng bỏ chọn sản phẩm đó.
                 </p>
               </div>
             ) : (
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900 text-xs flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
                 <span className="font-semibold">
-                  Tất cả linh kiện đều sẵn sàng để đặt hàng.
+                  {selectedTotals.selectedLineCount} sản phẩm đã chọn sẵn sàng để thanh toán.
                 </span>
               </div>
             )}
 
             {/* Checkout CTA */}
-            {cart.canCheckout ? (
+            {selectedTotals.canCheckoutSelected ? (
               <Link
                 to="/checkout"
                 className="w-full py-3.5 px-6 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-sm sm:text-base font-bold transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
               >
-                <span>Tiến Hành Thanh Toán</span>
+                <span>Tiến Hành Thanh Toán ({selectedTotals.selectedLineCount})</span>
               </Link>
             ) : (
               <button

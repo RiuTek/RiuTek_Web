@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import type { CartDto, CartStatus } from './cartTypes'
+import type { CartSelectionTotals } from './cartSelectionHelper'
 
 export interface CartContextValue {
   cart: CartDto | null
@@ -14,6 +15,16 @@ export interface CartContextValue {
   removeItem: (productId: string) => Promise<void>
   clearCart: () => Promise<void>
   clearError: () => void
+
+  // Selection states & operations
+  selectedProductIds: string[]
+  setSelectedProductIds: (ids: string[] | ((prev: string[]) => string[])) => void
+  toggleSelectProduct: (productId: string) => void
+  toggleSelectAll: () => void
+  isProductSelected: (productId: string) => boolean
+  selectedTotals: CartSelectionTotals
+  prunedNotification: string | null
+  clearPrunedNotification: () => void
 }
 
 export const CartContext = createContext<CartContextValue | null>(null)

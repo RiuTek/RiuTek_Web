@@ -46,6 +46,7 @@ export interface CheckoutQuoteDto {
 
 export interface GetCheckoutQuoteRequest {
   addressId: string
+  selectedProductIds?: string[]
 }
 
 export interface CheckoutCartRequest {
@@ -53,6 +54,7 @@ export interface CheckoutCartRequest {
   expectedCartVersion: number
   paymentMethod: PaymentMethod
   notes: string | null
+  selectedProductIds?: string[]
 }
 
 export interface CheckoutOrderDto {
@@ -89,6 +91,7 @@ export type PendingStripeCheckout =
   | (PendingStripeCommon & {
       source: 'cart'
       expectedCartVersion: number
+      selectedProductIds?: string[]
     })
   | (PendingStripeCommon & {
       source: 'product'

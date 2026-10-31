@@ -1,24 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useBlocker } from 'react-router-dom'
 import { ApiError } from '../../lib/api'
 import { useAuth } from '../auth/AuthContext'
+import { UserRole } from '../auth/authTypes'
 import { useAddresses } from '../addresses/AddressContext'
 import { useCart } from '../cart/CartContext'
 import { checkoutCart, getCheckoutQuote } from './checkoutApi'
 import {
   CHECKOUT_ERROR_MESSAGES,
-  MAX_NOTES_LENGTH,
 } from './checkoutConstants'
 import {
   savePendingStripeCheckout,
   validateStripeRedirectUrl,
 } from './stripeCheckoutSession'
 import type {
-  CheckoutCartRequest,
   CheckoutOrderDto,
   CheckoutQuoteDto,
   PaymentMethod,
 } from './checkoutTypes'
+import {
+  type ActiveCartAttempt,
+  loadSavedCartAttempt,
+  persistSavedCartAttempt,
+  canCreateNewCartOrder,
+  canReplayExistingCartAttempt,
+  canRecoverKnownCartOrder,
+  shouldBlockCartNavigation,
+  executeCartCheckoutSubmit,
+} from './cartCheckoutHelper'
 
 export type QuoteStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -39,13 +48,16 @@ function mapCheckoutError(err: unknown): string {
 export function useCartCheckout() {
   const navigate = useNavigate()
   const { user, getAccessToken } = useAuth()
+  const ownerId = user?.id ?? ''
+  const isCustomer = user?.role === UserRole.Customer
+
   const {
     addresses,
     status: addressStatus,
     error: addressError,
     loadAddresses,
   } = useAddresses()
-  const { cart, loadCart } = useCart()
+  const { cart, loadCart, selectedProductIds, setSelectedProductIds } = useCart()
 
   const [userSelectedAddressId, setUserSelectedAddressId] = useState<string | null>(null)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('COD')
@@ -61,34 +73,44 @@ export function useCartCheckout() {
     return defaultAddr ? defaultAddr.id : null
   }, [addresses, userSelectedAddressId])
 
-  const [quote, setQuote] = useState<CheckoutQuoteDto | null>(null)
-  const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>(() =>
-    selectedAddressId ? 'loading' : 'idle'
+  // Active attempt khôi phục từ storage
+  const [activeAttempt, setActiveAttempt] = useState<ActiveCartAttempt | null>(() =>
+    loadSavedCartAttempt(ownerId)
   )
-  const [quoteError, setQuoteError] = useState<string | null>(null)
 
-  // Điều chỉnh quote state ngay trong render khi selectedAddressId thay đổi (không dùng useEffect)
-  const [prevAddressId, setPrevAddressId] = useState(selectedAddressId)
-  if (selectedAddressId !== prevAddressId) {
-    setPrevAddressId(selectedAddressId)
-    setQuote(null)
-    setQuoteStatus(selectedAddressId ? 'loading' : 'idle')
-    setQuoteError(null)
-  }
+  const isMountedRef = useRef(true)
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  // One-shot synchronous bypass cho navigation blocker khi order thành công
+  const isSuccessBypassRef = useRef(false)
+  const submitSeqRef = useRef(0)
+
+  // React Router blocker để tránh khách rời trang khi attempt chưa xác định kết quả
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    shouldBlockCartNavigation({
+      currentPath: currentLocation.pathname,
+      nextPath: nextLocation.pathname,
+      isSuccessBypass: isSuccessBypassRef.current,
+      isAttemptActive: activeAttempt !== null && activeAttempt.status !== 'idle',
+    })
+  )
+
+  const [quote, setQuote] = useState<CheckoutQuoteDto | null>(null)
+  const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>('idle')
+  const [quoteError, setQuoteError] = useState<string | null>(null)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  // Tracking sequence để huỷ response quote cũ nếu user đổi địa chỉ nhanh
+  // Tracking sequence để huỷ response quote cũ nếu user đổi địa chỉ/selection/version
   const quoteRequestIdRef = useRef(0)
 
-  // Idempotency tracking
-  const idempotencyKeyRef = useRef<string | null>(null)
-  const lastFingerprintRef = useRef<string | null>(null)
-
-  /**
-   * Helper private gọi API với token và retry 1 lần khi 401
-   */
+  // Token helper có retry 1 lần khi 401
   const withAuthRetry = useCallback(
     async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
       let token = await getAccessToken(false)
@@ -112,16 +134,38 @@ export function useCartCheckout() {
     [getAccessToken]
   )
 
-  /**
-   * Tải báo giá quote khi selectedAddressId thay đổi
-   */
+  // Quote identity tracking
+  const sortedSelectedIdsStr = useMemo(
+    () => [...selectedProductIds].sort().join(','),
+    [selectedProductIds]
+  )
+  const cartVersion = cart?.version ?? 0
+
+  const currentQuoteIdentity = useMemo(() => {
+    if (!selectedAddressId || selectedProductIds.length === 0) return ''
+    return `${ownerId}:${selectedAddressId}:${sortedSelectedIdsStr}:${cartVersion}`
+  }, [ownerId, selectedAddressId, sortedSelectedIdsStr, cartVersion, selectedProductIds.length])
+
+  const [prevQuoteIdentity, setPrevQuoteIdentity] = useState(currentQuoteIdentity)
+  if (currentQuoteIdentity !== prevQuoteIdentity) {
+    setPrevQuoteIdentity(currentQuoteIdentity)
+    setQuote(null)
+    setQuoteStatus(currentQuoteIdentity ? 'loading' : 'idle')
+    setQuoteError(null)
+  }
+
+  // Tải báo giá khi quote identity thay đổi
   useEffect(() => {
-    if (!selectedAddressId) return
+    if (!currentQuoteIdentity || !selectedAddressId || selectedProductIds.length === 0) {
+      return
+    }
 
     let cancelled = false
     const currentRequestId = ++quoteRequestIdRef.current
 
-    withAuthRetry((token) => getCheckoutQuote(selectedAddressId, token))
+    withAuthRetry((token) =>
+      getCheckoutQuote(selectedAddressId, token, selectedProductIds)
+    )
       .then((result) => {
         if (!cancelled && currentRequestId === quoteRequestIdRef.current) {
           setQuote(result)
@@ -140,17 +184,17 @@ export function useCartCheckout() {
     return () => {
       cancelled = true
     }
-  }, [selectedAddressId, withAuthRetry])
+  }, [currentQuoteIdentity, selectedAddressId, selectedProductIds, withAuthRetry])
 
   const refetchQuote = useCallback(async () => {
-    if (!selectedAddressId) return
+    if (!selectedAddressId || selectedProductIds.length === 0) return
     const currentRequestId = ++quoteRequestIdRef.current
     setQuoteStatus('loading')
     setQuoteError(null)
 
     try {
       const result = await withAuthRetry((token) =>
-        getCheckoutQuote(selectedAddressId, token)
+        getCheckoutQuote(selectedAddressId, token, selectedProductIds)
       )
       if (currentRequestId === quoteRequestIdRef.current) {
         setQuote(result)
@@ -164,140 +208,130 @@ export function useCartCheckout() {
         setQuoteStatus('error')
       }
     }
-  }, [selectedAddressId, withAuthRetry])
+  }, [selectedAddressId, selectedProductIds, withAuthRetry])
 
-  /**
-   * Xử lý gửi đơn đặt hàng
-   */
+  // Gating quyết định submit
+  const canCreate = canCreateNewCartOrder({
+    isCustomer,
+    isSubmitting,
+    activeAttempt,
+    selectedAddressId,
+    quote,
+    quoteStatus,
+    selectedProductIds,
+    notes,
+  })
+
+  const canReplay = canReplayExistingCartAttempt({
+    activeAttempt,
+    isSubmitting,
+  })
+
+  const canRecover = canRecoverKnownCartOrder({
+    activeAttempt,
+    isSubmitting,
+  })
+
   const handleCheckout = async (): Promise<CheckoutOrderDto | void> => {
-    if (isSubmitting) return
+    if (isSubmitting || !user?.id) return
 
-    if (!selectedAddressId) {
-      setSubmitError('Vui lòng chọn hoặc thêm địa chỉ nhận hàng.')
-      return
-    }
+    const submitSeq = ++submitSeqRef.current
+    const isContextCurrent = () =>
+      isMountedRef.current &&
+      user.id === ownerId &&
+      submitSeqRef.current === submitSeq
 
-    if (!quote || quoteStatus !== 'ready') {
-      setSubmitError('Chưa có thông tin báo giá hợp lệ. Vui lòng thử lại.')
-      return
-    }
-
-    if (!quote.canCheckout || quote.items.length === 0) {
-      setSubmitError('Giỏ hàng chưa đủ điều kiện để thanh toán. Vui lòng kiểm tra lại.')
-      return
-    }
-
-    const cleanNotes = notes.trim()
-    if (cleanNotes.length > MAX_NOTES_LENGTH) {
-      setSubmitError(`Ghi chú không được vượt quá ${MAX_NOTES_LENGTH} ký tự.`)
-      return
-    }
-
-    // Quản lý Idempotency-Key
-    const normalizedNotes = cleanNotes.length > 0 ? cleanNotes : ''
-    const currentFingerprint = `${selectedAddressId}:${quote.cartVersion}:${paymentMethod}:${normalizedNotes}`
-
-    let idempotencyKey = idempotencyKeyRef.current
-    if (!idempotencyKey || lastFingerprintRef.current !== currentFingerprint) {
-      idempotencyKey = crypto.randomUUID()
-      idempotencyKeyRef.current = idempotencyKey
-      lastFingerprintRef.current = currentFingerprint
-    }
-
-    const request: CheckoutCartRequest = {
-      addressId: selectedAddressId,
-      expectedCartVersion: quote.cartVersion,
+    await executeCartCheckoutSubmit({
+      ownerId,
+      user,
+      canCreate,
+      canReplay,
+      activeAttempt,
+      selectedAddressId,
+      expectedCartVersion: quote?.cartVersion ?? cartVersion,
       paymentMethod,
-      notes: cleanNotes.length > 0 ? cleanNotes : null,
-    }
+      notes,
+      selectedProductIds,
+      isSubmitting,
+      getAccessToken,
+      checkoutCart,
+      savePendingStripeCheckout,
+      validateStripeRedirectUrl,
+      onSuccessNavigate: (order) => {
+        isSuccessBypassRef.current = true
+        setActiveAttempt(null)
+        persistSavedCartAttempt(null, ownerId)
 
-    setIsSubmitting(true)
-    setSubmitError(null)
+        // Prune các sản phẩm vừa mua khỏi selection
+        if (order.items && order.items.length > 0) {
+          const purchasedIds = new Set(order.items.map((i) => i.productId.toLowerCase()))
+          setSelectedProductIds((prev) =>
+            prev.filter((id) => !purchasedIds.has(id.toLowerCase()))
+          )
+        }
 
-    try {
-      const order = await withAuthRetry((token) =>
-        checkoutCart(request, idempotencyKey!, token)
-      )
+        // Tải lại giỏ hàng (giữ lại các sản phẩm chưa thanh toán)
+        loadCart().catch(() => {})
 
-      if (paymentMethod === 'COD') {
-        // Clear attempt
-        idempotencyKeyRef.current = null
-        lastFingerprintRef.current = null
-
-        // Đồng bộ lại Cart Provider với giỏ hàng đã bị Backend xóa
-        loadCart().catch(() => {
-          // Lỗi reload Cart không làm hỏng flow đặt hàng thành công
-        })
-
-        // Điều hướng tới trang hoàn tất
+        if (blocker.state === 'blocked') {
+          blocker.reset()
+        }
         navigate(`/checkout/success?orderId=${encodeURIComponent(order.id)}`)
-        return order
-      }
+      },
+      setActiveAttempt,
+      persistSavedAttempt: persistSavedCartAttempt,
+      setSubmitError,
+      setIsSubmitting,
+      isContextCurrent,
+      onReconcileNeeded: () => {
+        loadCart().catch(() => {})
+        refetchQuote().catch(() => {})
+      },
+      onAddressNotFound: () => {
+        loadAddresses().catch(() => {})
+      },
+    })
+  }
 
-      if (paymentMethod === 'Stripe') {
-        const action = order.paymentAction
-        if (
-          action?.type === 'Redirect' &&
-          action.url &&
-          validateStripeRedirectUrl(action.url)
-        ) {
-          // Lưu metadata trước khi chuyển hướng sang Stripe
-          if (user?.id) {
-            savePendingStripeCheckout({
-              source: 'cart',
-              userId: user.id,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              idempotencyKey: idempotencyKey!,
-              addressId: selectedAddressId,
-              expectedCartVersion: quote.cartVersion,
-            })
-          }
-
-          // Đồng bộ lại Cart Provider
-          loadCart().catch(() => {})
-
-          // Chuyển hướng trình duyệt sang Stripe Checkout
-          window.location.assign(action.url)
-          return order
-        }
-
-        // Action hoặc URL không hợp lệ
-        setSubmitError(
-          'Không thể khởi tạo cổng thanh toán Stripe. Đơn hàng đã được tạo, vui lòng thử lại sau.'
-        )
-      }
-    } catch (err) {
-      const errorMsg = mapCheckoutError(err)
-      setSubmitError(errorMsg)
-
-      if (err instanceof ApiError) {
-        // Nhóm lỗi giỏ hàng hoặc tồn kho thay đổi: tải lại cart và quote, xoá key
-        if (
-          err.code === 'Checkout.CartChanged' ||
-          err.code === 'Checkout.EmptyCart' ||
-          err.code === 'Checkout.ProductNotFound' ||
-          err.code === 'Checkout.ProductInactive' ||
-          err.code === 'Checkout.InvalidPrice' ||
-          err.code === 'Checkout.InsufficientStock' ||
-          err.code === 'Checkout.InventoryChanged'
-        ) {
-          idempotencyKeyRef.current = null
-          lastFingerprintRef.current = null
-          loadCart().catch(() => {})
-          refetchQuote().catch(() => {})
-        } else if (err.code === 'Checkout.AddressNotFound') {
-          loadAddresses().catch(() => {})
-        }
-      }
-    } finally {
-      setIsSubmitting(false)
+  // Thử lưu lại pending Stripe và chuyển hướng
+  const handleRetryStorageAndRedirect = () => {
+    if (!activeAttempt?.knownOrder?.paymentAction?.url || !user?.id) return
+    const url = activeAttempt.knownOrder.paymentAction.url
+    if (!validateStripeRedirectUrl(url)) {
+      setSubmitError('URL thanh toán Stripe không hợp lệ.')
+      return
     }
+
+    const saved = savePendingStripeCheckout({
+      source: 'cart',
+      userId: user.id,
+      orderId: activeAttempt.knownOrder.id,
+      orderNumber: activeAttempt.knownOrder.orderNumber,
+      idempotencyKey: activeAttempt.idempotencyKey,
+      addressId: activeAttempt.requestPayload.addressId,
+      expectedCartVersion: activeAttempt.requestPayload.expectedCartVersion,
+      selectedProductIds: activeAttempt.requestPayload.selectedProductIds,
+    })
+
+    if (!saved) {
+      setSubmitError(
+        'Vẫn không thể lưu phiên vào trình duyệt. Vui lòng mở chi tiết đơn hàng trong tài khoản.'
+      )
+      return
+    }
+
+    window.location.assign(url)
   }
 
   return {
     user,
     cart,
+    selectedProductIds,
+    activeAttempt,
+    canCreate,
+    canReplay,
+    canRecover,
+    blocker,
     addresses,
     addressStatus,
     addressError,
@@ -316,5 +350,6 @@ export function useCartCheckout() {
     submitError,
     setSubmitError,
     handleCheckout,
+    handleRetryStorageAndRedirect,
   }
 }

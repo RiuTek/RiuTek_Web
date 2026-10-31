@@ -82,6 +82,9 @@ export const StripeCheckoutCancelPage: React.FC = () => {
             expectedCartVersion: pending.expectedCartVersion,
             paymentMethod: 'Stripe',
             notes: null,
+            ...(pending.selectedProductIds
+              ? { selectedProductIds: pending.selectedProductIds }
+              : {}),
           },
           pending.idempotencyKey,
           authToken

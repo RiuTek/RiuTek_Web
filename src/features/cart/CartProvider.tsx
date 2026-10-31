@@ -21,6 +21,13 @@ import {
   type CartDto,
   type CartStatus,
 } from './cartTypes'
+import {
+  loadCartSelection,
+  persistCartSelection,
+  reconcileSelectionWithCart,
+  calculateCartSelectionTotals,
+  validateSelectedProductIds,
+} from './cartSelectionHelper'
 
 interface CartProviderProps {
   children: React.ReactNode
@@ -53,7 +60,8 @@ function isCartConflict(err: unknown): boolean {
  * Được mount/unmount tự động qua session key của CartProvider.
  */
 const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
-  const { status: authStatus, getAccessToken } = useAuth()
+  const { status: authStatus, user, getAccessToken } = useAuth()
+  const ownerId = user?.id ?? ''
   const isMountedRef = useRef(true)
 
   useEffect(() => {
@@ -67,6 +75,109 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
   const [status, setStatus] = useState<CartStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [isMutating, setIsMutating] = useState(false)
+
+  // Selection state
+  const [selectedProductIds, setSelectedProductIdsState] = useState<string[]>(() =>
+    loadCartSelection(ownerId)
+  )
+
+  const [prunedNotification, setPrunedNotification] = useState<string | null>(null)
+
+  const applyCartUpdate = useCallback(
+    (newCart: CartDto) => {
+      setCart(newCart)
+      setStatus('ready')
+      setError(null)
+      setSelectedProductIdsState((currentSelection) => {
+        const { reconciledIds, hasPruned, prunedCount } = reconcileSelectionWithCart(
+          currentSelection,
+          newCart
+        )
+        if (hasPruned) {
+          persistCartSelection(ownerId, reconciledIds)
+          setPrunedNotification(
+            `Đã tự động bỏ chọn ${prunedCount} sản phẩm không còn khả dụng hoặc đã thay đổi trong giỏ hàng.`
+          )
+          return reconciledIds
+        }
+        return currentSelection
+      })
+    },
+    [ownerId]
+  )
+
+  const setSelectedProductIds = useCallback(
+    (action: string[] | ((prev: string[]) => string[])) => {
+      setSelectedProductIdsState((prev) => {
+        const next = typeof action === 'function' ? action(prev) : action
+        const valid = validateSelectedProductIds(next)
+        persistCartSelection(ownerId, valid)
+        return valid
+      })
+    },
+    [ownerId]
+  )
+
+  const toggleSelectProduct = useCallback(
+    (productId: string) => {
+      if (!cart || !cart.items) return
+      const targetItem = cart.items.find(
+        (i) => i.productId.toLowerCase() === productId.toLowerCase()
+      )
+      // Không thể chọn sản phẩm canPurchase === false
+      if (!targetItem || !targetItem.canPurchase) return
+
+      setSelectedProductIdsState((prev) => {
+        const exists = prev.some((id) => id.toLowerCase() === productId.toLowerCase())
+        let next: string[]
+        if (exists) {
+          next = prev.filter((id) => id.toLowerCase() !== productId.toLowerCase())
+        } else {
+          if (prev.length >= 50) return prev
+          next = [...prev, targetItem.productId]
+        }
+        persistCartSelection(ownerId, next)
+        return next
+      })
+    },
+    [cart, ownerId]
+  )
+
+  const toggleSelectAll = useCallback(() => {
+    if (!cart || !cart.items) return
+    const purchasable = cart.items.filter((i) => i.canPurchase)
+    if (purchasable.length === 0) return
+
+    setSelectedProductIdsState((prev) => {
+      const allSelected =
+        purchasable.length > 0 &&
+        purchasable.every((i) =>
+          prev.some((id) => id.toLowerCase() === i.productId.toLowerCase())
+        )
+      const next = allSelected
+        ? []
+        : purchasable.map((i) => i.productId).slice(0, 50)
+      persistCartSelection(ownerId, next)
+      return next
+    })
+  }, [cart, ownerId])
+
+  const isProductSelected = useCallback(
+    (productId: string) => {
+      return selectedProductIds.some(
+        (id) => id.toLowerCase() === productId.toLowerCase()
+      )
+    },
+    [selectedProductIds]
+  )
+
+  const selectedTotals = useMemo(() => {
+    return calculateCartSelectionTotals(cart, selectedProductIds)
+  }, [cart, selectedProductIds])
+
+  const clearPrunedNotification = useCallback(() => {
+    setPrunedNotification(null)
+  }, [])
 
   // Lưu trữ active load promise cho phiên hiện tại (không dùng chung giữa các user)
   const activeLoadRef = useRef<Promise<CartDto> | null>(null)
@@ -116,9 +227,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       const fetchPromise = withAuthRetry((token) => getCart(token, signal))
         .then((data) => {
           if (isMountedRef.current) {
-            setCart(data)
-            setStatus('ready')
-            setError(null)
+            applyCartUpdate(data)
           }
           return data
         })
@@ -140,7 +249,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       activeLoadRef.current = fetchPromise
       return fetchPromise
     },
-    [withAuthRetry]
+    [withAuthRetry, applyCartUpdate]
   )
 
   const loadCart = useCallback(async (): Promise<void> => {
@@ -194,8 +303,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
           addCartItem({ productId, quantity }, token)
         )
         if (isMountedRef.current) {
-          setCart(updatedCart)
-          setError(null)
+          applyCartUpdate(updatedCart)
         }
         return updatedCart
       } catch (err) {
@@ -213,7 +321,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
         }
       }
     },
-    [authStatus, withAuthRetry, recoverFromConflict]
+    [authStatus, withAuthRetry, applyCartUpdate, recoverFromConflict]
   )
 
   /**
@@ -231,8 +339,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
           apiAddPCBuildToCart(pcBuildId, token)
         )
         if (isMountedRef.current) {
-          setCart(updatedCart)
-          setError(null)
+          applyCartUpdate(updatedCart)
         }
         return updatedCart
       } catch (err) {
@@ -250,7 +357,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
         }
       }
     },
-    [authStatus, withAuthRetry, recoverFromConflict]
+    [authStatus, withAuthRetry, applyCartUpdate, recoverFromConflict]
   )
 
   /**
@@ -264,8 +371,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
           setCartItemQuantity(productId, quantity, token)
         )
         if (isMountedRef.current) {
-          setCart(updatedCart)
-          setError(null)
+          applyCartUpdate(updatedCart)
         }
         return updatedCart
       } catch (err) {
@@ -283,7 +389,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
         }
       }
     },
-    [withAuthRetry, recoverFromConflict]
+    [withAuthRetry, applyCartUpdate, recoverFromConflict]
   )
 
   /**
@@ -294,6 +400,11 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       setIsMutating(true)
       try {
         await withAuthRetry((token) => removeCartItem(productId, token))
+        setSelectedProductIdsState((prev) => {
+          const next = prev.filter((id) => id.toLowerCase() !== productId.toLowerCase())
+          persistCartSelection(ownerId, next)
+          return next
+        })
         // Endpoint trả 204 No Content -> refetch cart
         await loadCartInternal()
       } catch (err) {
@@ -311,7 +422,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
         }
       }
     },
-    [withAuthRetry, loadCartInternal, recoverFromConflict]
+    [withAuthRetry, ownerId, loadCartInternal, recoverFromConflict]
   )
 
   /**
@@ -321,6 +432,8 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
     setIsMutating(true)
     try {
       await withAuthRetry((token) => apiClearCart(token))
+      setSelectedProductIdsState([])
+      persistCartSelection(ownerId, [])
       // Endpoint trả 204 No Content -> refetch cart
       await loadCartInternal()
     } catch (err) {
@@ -337,7 +450,7 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
         setIsMutating(false)
       }
     }
-  }, [withAuthRetry, loadCartInternal, recoverFromConflict])
+  }, [withAuthRetry, ownerId, loadCartInternal, recoverFromConflict])
 
   const clearError = useCallback(() => {
     setError(null)
@@ -363,6 +476,14 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       removeItem,
       clearCart,
       clearError,
+      selectedProductIds,
+      setSelectedProductIds,
+      toggleSelectProduct,
+      toggleSelectAll,
+      isProductSelected,
+      selectedTotals,
+      prunedNotification,
+      clearPrunedNotification,
     }),
     [
       cart,
@@ -377,6 +498,14 @@ const CartSessionProvider: React.FC<CartProviderProps> = ({ children }) => {
       removeItem,
       clearCart,
       clearError,
+      selectedProductIds,
+      setSelectedProductIds,
+      toggleSelectProduct,
+      toggleSelectAll,
+      isProductSelected,
+      selectedTotals,
+      prunedNotification,
+      clearPrunedNotification,
     ]
   )
 
