@@ -346,11 +346,15 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
             <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
             <div className="space-y-1">
               <span className="font-bold text-sm block">
-                Chưa thể xác nhận kết quả từ máy chủ
+                {knownOrder
+                  ? `Đơn hàng #${knownOrder.orderNumber} đã ghi nhận nhưng chưa thể xác nhận tiếp thanh toán`
+                  : 'Chưa thể xác nhận kết quả từ máy chủ'}
               </span>
               <p className="text-amber-800 leading-relaxed">
                 {unresolvedMessage ||
-                  'Yêu cầu trước đó bị gián đoạn hoặc phản hồi chậm. Đơn hàng của bạn có thể đã được khởi tạo thành công trên hệ thống.'}
+                  (knownOrder
+                    ? 'Yêu cầu thanh toán tiếp theo bị gián đoạn. Đơn hàng của bạn đã được ghi nhận trên hệ thống.'
+                    : 'Yêu cầu trước đó bị gián đoạn hoặc phản hồi chậm. Đơn hàng của bạn có thể đã được khởi tạo thành công trên hệ thống.')}
               </p>
               <p className="text-amber-900 font-medium pt-0.5">
                 Bạn có thể bấm <strong>"Thử lại an toàn"</strong> để kiểm tra lại với cùng mã giao dịch này (máy chủ sẽ tự nhận diện và không tạo đơn trùng lặp), hoặc kiểm tra mục Đơn hàng của tôi.
@@ -358,12 +362,21 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
             </div>
           </div>
 
-          <div className="pt-1 flex items-center gap-2">
+          <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+            {knownOrder && (
+              <Link
+                to={`/orders/${encodeURIComponent(knownOrder.id)}`}
+                className="px-4 py-2 bg-amber-700 hover:bg-amber-800 text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center justify-center gap-1.5 shadow-xs"
+              >
+                <span>Xem chi tiết đơn #{knownOrder.orderNumber}</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            )}
             <Link
               to="/orders"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-bold text-amber-900 hover:text-amber-950 underline text-xs"
+              className="inline-flex items-center gap-1 font-bold text-amber-900 hover:text-amber-950 underline text-xs py-1"
             >
               <span>Kiểm tra danh sách Đơn hàng của tôi</span>
               <ExternalLink className="w-3.5 h-3.5" />
