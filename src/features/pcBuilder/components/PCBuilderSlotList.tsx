@@ -33,6 +33,7 @@ interface PCBuilderSlotListProps {
   selectedItems: SelectedPCBuildItem[]
   previewItems?: PCBuildPreviewItem[]
   activeSlot: ComponentType | null
+  disabled?: boolean
   onSelectSlot: (slot: ComponentType) => void
   onUpdateQuantity: (productId: string, quantity: number) => void
   onRemoveItem: (productId: string) => void
@@ -81,6 +82,7 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
   selectedItems,
   previewItems = [],
   activeSlot,
+  disabled = false,
   onSelectSlot,
   onUpdateQuantity,
   onRemoveItem,
@@ -148,8 +150,9 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
               {slotItems.length === 0 ? (
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => onSelectSlot(slotType)}
-                  className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-2xs"
+                  className="px-3.5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none text-white rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-2xs"
                 >
                   <Plus className="w-4 h-4" />
                   <span>Chọn linh kiện</span>
@@ -157,8 +160,9 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
               ) : !isSingle ? (
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => onSelectSlot(slotType)}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1"
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none text-slate-700 rounded-xl text-xs font-bold transition-colors inline-flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Thêm mục khác</span>
@@ -245,11 +249,11 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                           <div className="flex items-center rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
                             <button
                               type="button"
-                              disabled={quantity <= MIN_QUANTITY}
+                              disabled={disabled || quantity <= MIN_QUANTITY}
                               onClick={() =>
                                 onUpdateQuantity(product.id, quantity - 1)
                               }
-                              className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-colors"
+                              className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none text-xs font-bold transition-colors"
                               aria-label="Giảm số lượng"
                             >
                               -
@@ -259,11 +263,11 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                             </span>
                             <button
                               type="button"
-                              disabled={quantity >= MAX_MULTI_CHOICE_QUANTITY}
+                              disabled={disabled || quantity >= MAX_MULTI_CHOICE_QUANTITY}
                               onClick={() =>
                                 onUpdateQuantity(product.id, quantity + 1)
                               }
-                              className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-bold transition-colors"
+                              className="w-7 h-7 flex items-center justify-center text-slate-600 hover:bg-slate-200 disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none text-xs font-bold transition-colors"
                               aria-label="Tăng số lượng"
                             >
                               +
@@ -275,8 +279,9 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                         {isSingle && (
                           <button
                             type="button"
+                            disabled={disabled}
                             onClick={() => onSelectSlot(slotType)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:pointer-events-none text-slate-700 rounded-xl text-xs font-semibold transition-colors"
                             title="Chọn linh kiện khác thay thế"
                           >
                             <RefreshCw className="w-3.5 h-3.5" />
@@ -287,8 +292,9 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                         {/* Remove item button */}
                         <button
                           type="button"
+                          disabled={disabled}
                           onClick={() => onRemoveItem(product.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-30 disabled:cursor-not-allowed disabled:pointer-events-none rounded-xl transition-colors"
                           title="Gỡ linh kiện này"
                           aria-label={`Gỡ linh kiện ${product.name}`}
                         >

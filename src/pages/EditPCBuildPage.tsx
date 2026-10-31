@@ -133,11 +133,14 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   const putSeqRef = useRef(0)
   const previewSeqRef = useRef(0)
   const previewAbortRef = useRef<AbortController | null>(null)
+  const isSaveSuccessBypassRef = useRef(false)
+  const isSavedCleanRef = useRef(false)
 
   useEffect(() => {
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
+      isSaveSuccessBypassRef.current = false
       if (previewAbortRef.current) {
         previewAbortRef.current.abort()
       }
@@ -147,6 +150,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   useEffect(() => {
     userRef.current = user
     buildIdRef.current = buildId
+    isSaveSuccessBypassRef.current = false
   }, [user, buildId])
 
   // Tính toán trạng thái dirty
@@ -161,10 +165,19 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
 
   // Chặn điều hướng nội bộ bằng useBlocker khi có thay đổi chưa lưu
   const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      !isSavedClean &&
-      isDirty &&
-      currentLocation.pathname !== nextLocation.pathname
+    ({ currentLocation, nextLocation }) => {
+      if (isSaveSuccessBypassRef.current) {
+        // Chỉ bypass đúng một lần điều hướng sau PUT thành công của context hiện hành
+        isSaveSuccessBypassRef.current = false
+        return false
+      }
+      return (
+        !isSavedCleanRef.current &&
+        !isSavedClean &&
+        isDirty &&
+        currentLocation.pathname !== nextLocation.pathname
+      )
+    }
   )
 
   // Cảnh báo người dùng khi reload hoặc đóng tab
@@ -376,11 +389,17 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
 
   // Chọn hoặc thay thế sản phẩm
   const handleSelectProduct = useCallback((product: ProductSummary) => {
+    if (isSubmitting) return
+    isSavedCleanRef.current = false
+    setIsSavedClean(false)
     setSelectedItems((prev) => computeSelectedProduct(prev, product))
-  }, [])
+  }, [isSubmitting])
 
   // Cập nhật số lượng
   const handleUpdateItemQuantity = useCallback((productId: string, qty: number) => {
+    if (isSubmitting) return
+    isSavedCleanRef.current = false
+    setIsSavedClean(false)
     setSelectedItems((prev) =>
       prev.map((item) => {
         if (item.product.id !== productId) return item
@@ -394,17 +413,23 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
         return clampedQty === item.quantity ? item : { ...item, quantity: clampedQty }
       })
     )
-  }, [])
+  }, [isSubmitting])
 
   // Gỡ sản phẩm
   const handleRemoveItem = useCallback((productId: string) => {
+    if (isSubmitting) return
+    isSavedCleanRef.current = false
+    setIsSavedClean(false)
     setSelectedItems((prev) => prev.filter((item) => item.product.id !== productId))
-  }, [])
+  }, [isSubmitting])
 
   // Xóa toàn bộ lựa chọn trong form
   const handleClearSelection = useCallback(() => {
+    if (isSubmitting) return
+    isSavedCleanRef.current = false
+    setIsSavedClean(false)
     setSelectedItems([])
-  }, [])
+  }, [isSubmitting])
 
   // Retry nạp lại record ban đầu
   const handleRetryRecordLoad = () => {
@@ -436,6 +461,8 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     setIsSubmitting(true)
     setSubmitError(null)
     setIsConflict(false)
+    setActiveSlot(null) // Đóng ngay modal picker đang mở khi bắt đầu submit
+    isSaveSuccessBypassRef.current = false
 
     const requestPayload: UpdatePCBuildRequest = {
       name: cleanName,
@@ -468,11 +495,20 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
 
       if (!isContextCurrent()) return
 
-      // Cập nhật thành công: đánh dấu clean và điều hướng về trang chi tiết
+      // Cập nhật thành công: bypass blocker đồng bộ và điều hướng về trang chi tiết
+      isSaveSuccessBypassRef.current = true
+      isSavedCleanRef.current = true
       setIsSavedClean(true)
+
+      // Nếu trước đó đang có navigation bị chặn (modal pending blocker), reset để không bị treo
+      if (blocker.state === 'blocked') {
+        blocker.reset()
+      }
+
       navigate(`/pc-builds/${updatedRecord.id}`, { replace: true })
     } catch (err: unknown) {
       if (!isContextCurrent()) return
+      isSaveSuccessBypassRef.current = false
 
       if (err instanceof ApiError) {
         if (err.status === 409) {
@@ -630,6 +666,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
               selectedItems={selectedItems}
               previewItems={effectivePreviewResult?.items}
               activeSlot={activeSlot}
+              disabled={isSubmitting}
               onSelectSlot={(slot: ComponentType) => {
                 if (!isSubmitting) {
                   setActiveSlot(slot)
@@ -645,9 +682,21 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
             <PCBuilderEditSummary
               buildId={buildId}
               name={name}
-              onNameChange={setName}
+              onNameChange={(val) => {
+                if (!isSubmitting) {
+                  isSavedCleanRef.current = false
+                  setIsSavedClean(false)
+                  setName(val)
+                }
+              }}
               description={description}
-              onDescriptionChange={setDescription}
+              onDescriptionChange={(val) => {
+                if (!isSubmitting) {
+                  isSavedCleanRef.current = false
+                  setIsSavedClean(false)
+                  setDescription(val)
+                }
+              }}
               selectedItems={selectedItems}
               previewResult={effectivePreviewResult}
               isPreviewLoading={isPreviewLoading}
