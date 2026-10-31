@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useBlocker } from 'react-router-dom'
-import { ApiError } from '../../lib/api'
 import { useAuth } from '../auth/AuthContext'
-import { UserRole } from '../auth/authTypes'
 import { useAddresses } from '../addresses/AddressContext'
 import { useCart } from '../cart/CartContext'
 import { checkoutCart, getCheckoutQuote } from './checkoutApi'
-import {
-  CHECKOUT_ERROR_MESSAGES,
-} from './checkoutConstants'
 import {
   savePendingStripeCheckout,
   validateStripeRedirectUrl,
@@ -20,6 +15,14 @@ import type {
 } from './checkoutTypes'
 import {
   type ActiveCartAttempt,
+  type CartQuoteCoordinator,
+  type CartQuoteCoordinatorState,
+  type CartQuoteSnapshot,
+  type QuoteStatus,
+  isCartCheckoutEligible,
+  createCartQuoteSnapshot,
+  doesQuoteMatchSnapshot,
+  createCartQuoteCoordinator,
   loadSavedCartAttempt,
   persistSavedCartAttempt,
   canCreateNewCartOrder,
@@ -29,27 +32,13 @@ import {
   executeCartCheckoutSubmit,
 } from './cartCheckoutHelper'
 
-export type QuoteStatus = 'idle' | 'loading' | 'ready' | 'error'
-
-function mapCheckoutError(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.code && CHECKOUT_ERROR_MESSAGES[err.code]) {
-      return CHECKOUT_ERROR_MESSAGES[err.code]
-    }
-    if (err.description) return err.description
-    if (err.message) return err.message
-  }
-  if (err instanceof Error) {
-    return err.message
-  }
-  return 'Đã xảy ra lỗi trong quá trình xử lý đơn hàng. Vui lòng thử lại.'
-}
+export type { QuoteStatus }
 
 export function useCartCheckout() {
   const navigate = useNavigate()
-  const { user, getAccessToken } = useAuth()
+  const { status: authStatus, user, getAccessToken } = useAuth()
   const ownerId = user?.id ?? ''
-  const isCustomer = user?.role === UserRole.Customer
+  const isAuthenticated = isCartCheckoutEligible({ authStatus, user })
 
   const {
     addresses,
@@ -57,11 +46,17 @@ export function useCartCheckout() {
     error: addressError,
     loadAddresses,
   } = useAddresses()
-  const { cart, loadCart, selectedProductIds, setSelectedProductIds } = useCart()
+  const {
+    cart,
+    status: cartStatus,
+    loadCart,
+    selectedProductIds,
+    setSelectedProductIds,
+  } = useCart()
 
   const [userSelectedAddressId, setUserSelectedAddressId] = useState<string | null>(null)
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('COD')
-  const [notes, setNotes] = useState('')
+  const [paymentMethod, setPaymentMethodState] = useState<PaymentMethod>('COD')
+  const [notes, setNotesState] = useState('')
 
   // Tự động phân giải địa chỉ đang chọn từ user preference hoặc fallback default/first
   const selectedAddressId = useMemo(() => {
@@ -73,24 +68,95 @@ export function useCartCheckout() {
     return defaultAddr ? defaultAddr.id : null
   }, [addresses, userSelectedAddressId])
 
-  // Active attempt khôi phục từ storage
-  const [activeAttempt, setActiveAttempt] = useState<ActiveCartAttempt | null>(() =>
-    loadSavedCartAttempt(ownerId)
+  // Active attempt khôi phục từ storage theo từng ownerId
+  const [attemptState, setAttemptState] = useState<{
+    ownerId: string
+    attempt: ActiveCartAttempt | null
+  }>(() => ({
+    ownerId,
+    attempt: loadSavedCartAttempt(ownerId),
+  }))
+
+  const activeAttempt = useMemo(() => {
+    if (attemptState.ownerId === ownerId) {
+      return attemptState.attempt
+    }
+    return loadSavedCartAttempt(ownerId)
+  }, [attemptState, ownerId])
+
+  const setActiveAttempt = useCallback(
+    (nextAttempt: ActiveCartAttempt | null) => {
+      setAttemptState({
+        ownerId,
+        attempt: nextAttempt,
+      })
+    },
+    [ownerId]
   )
 
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  // Không cho phép đổi địa chỉ / phương thức / ghi chú khi đang submit hoặc có activeAttempt
+  const setSelectedAddressId = useCallback(
+    (addressId: string | null) => {
+      if (isSubmitting || activeAttempt !== null) return
+      setUserSelectedAddressId(addressId)
+    },
+    [isSubmitting, activeAttempt]
+  )
+
+  const setPaymentMethod = useCallback(
+    (method: PaymentMethod) => {
+      if (isSubmitting || activeAttempt !== null) return
+      setPaymentMethodState(method)
+    },
+    [isSubmitting, activeAttempt]
+  )
+
+  const setNotes = useCallback(
+    (nextNotes: string) => {
+      if (isSubmitting || activeAttempt !== null) return
+      setNotesState(nextNotes)
+    },
+    [isSubmitting, activeAttempt]
+  )
+
+  // Snapshot báo giá hiện hành (chỉ tồn tại khi session authenticated, cart ready, địa chỉ & selection hợp lệ)
+  const currentSnapshot = useMemo(
+    () =>
+      createCartQuoteSnapshot({
+        isAuthenticated,
+        ownerId,
+        addressId: selectedAddressId,
+        selectedProductIds,
+        cartStatus,
+        cart,
+      }),
+    [isAuthenticated, ownerId, selectedAddressId, selectedProductIds, cartStatus, cart]
+  )
+  const currentSnapshotKey = currentSnapshot?.key ?? ''
+
+  const [quoteState, setQuoteState] = useState<CartQuoteCoordinatorState>({
+    status: 'idle',
+    provenancedQuote: null,
+    error: null,
+    snapshotKey: null,
+  })
+
   const isMountedRef = useRef(true)
-  useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-    }
-  }, [])
+  const latestOwnerIdRef = useRef(ownerId)
+  const latestUserIdRef = useRef(user?.id ?? '')
+  const latestSnapshotRef = useRef<CartQuoteSnapshot | null>(currentSnapshot)
+  const getAccessTokenRef = useRef(getAccessToken)
+  const loadCartRef = useRef(loadCart)
+  const coordinatorRef = useRef<CartQuoteCoordinator | null>(null)
 
   // One-shot synchronous bypass cho navigation blocker khi order thành công
   const isSuccessBypassRef = useRef(false)
   const submitSeqRef = useRef(0)
 
-  // React Router blocker để tránh khách rời trang khi attempt chưa xác định kết quả
+  // React Router blocker để tránh rời trang khi attempt chưa xác định kết quả
   const blocker = useBlocker(({ currentLocation, nextLocation }) =>
     shouldBlockCartNavigation({
       currentPath: currentLocation.pathname,
@@ -100,125 +166,106 @@ export function useCartCheckout() {
     })
   )
 
-  const [quote, setQuote] = useState<CheckoutQuoteDto | null>(null)
-  const [quoteStatus, setQuoteStatus] = useState<QuoteStatus>('idle')
-  const [quoteError, setQuoteError] = useState<string | null>(null)
-
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-
-  // Tracking sequence để huỷ response quote cũ nếu user đổi địa chỉ/selection/version
-  const quoteRequestIdRef = useRef(0)
-
-  // Token helper có retry 1 lần khi 401
-  const withAuthRetry = useCallback(
-    async <T,>(operation: (token: string) => Promise<T>): Promise<T> => {
-      let token = await getAccessToken(false)
-      if (!token) {
-        throw new Error('Chưa đăng nhập.')
-      }
-
-      try {
-        return await operation(token)
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          token = await getAccessToken(true)
-          if (!token) {
-            throw new Error('Chưa đăng nhập.', { cause: err })
+  const getOrCreateCoordinator = useCallback((): CartQuoteCoordinator => {
+    if (!coordinatorRef.current) {
+      coordinatorRef.current = createCartQuoteCoordinator({
+        isContextCurrent: () =>
+          isMountedRef.current &&
+          Boolean(latestOwnerIdRef.current) &&
+          latestUserIdRef.current === latestOwnerIdRef.current,
+        getCurrentSnapshot: () => latestSnapshotRef.current,
+        getAccessToken: (forceRefresh) => getAccessTokenRef.current(forceRefresh),
+        getCheckoutQuote: (addressId, token, productIds, signal) =>
+          getCheckoutQuote(addressId, token, productIds, signal),
+        onStateChange: (nextState) => {
+          if (isMountedRef.current) {
+            setQuoteState(nextState)
           }
-          return await operation(token)
-        }
-        throw err
-      }
-    },
-    [getAccessToken]
-  )
+        },
+        onVersionMismatchSync: async () => {
+          await loadCartRef.current()
+        },
+      })
+    }
+    return coordinatorRef.current
+  }, [])
 
-  // Quote identity tracking
-  const sortedSelectedIdsStr = useMemo(
-    () => [...selectedProductIds].sort().join(','),
-    [selectedProductIds]
-  )
-  const cartVersion = cart?.version ?? 0
-
-  const currentQuoteIdentity = useMemo(() => {
-    if (!selectedAddressId || selectedProductIds.length === 0) return ''
-    return `${ownerId}:${selectedAddressId}:${sortedSelectedIdsStr}:${cartVersion}`
-  }, [ownerId, selectedAddressId, sortedSelectedIdsStr, cartVersion, selectedProductIds.length])
-
-  const [prevQuoteIdentity, setPrevQuoteIdentity] = useState(currentQuoteIdentity)
-  if (currentQuoteIdentity !== prevQuoteIdentity) {
-    setPrevQuoteIdentity(currentQuoteIdentity)
-    setQuote(null)
-    setQuoteStatus(currentQuoteIdentity ? 'loading' : 'idle')
-    setQuoteError(null)
-  }
-
-  // Tải báo giá khi quote identity thay đổi
+  // Cleanup khi unmount hoặc đổi owner/account
   useEffect(() => {
-    if (!currentQuoteIdentity || !selectedAddressId || selectedProductIds.length === 0) {
-      return
-    }
-
-    let cancelled = false
-    const currentRequestId = ++quoteRequestIdRef.current
-
-    withAuthRetry((token) =>
-      getCheckoutQuote(selectedAddressId, token, selectedProductIds)
-    )
-      .then((result) => {
-        if (!cancelled && currentRequestId === quoteRequestIdRef.current) {
-          setQuote(result)
-          setQuoteStatus('ready')
-          setQuoteError(null)
-        }
-      })
-      .catch((err: unknown) => {
-        if (!cancelled && currentRequestId === quoteRequestIdRef.current) {
-          const msg = mapCheckoutError(err)
-          setQuoteError(msg)
-          setQuoteStatus('error')
-        }
-      })
-
+    isMountedRef.current = true
+    latestOwnerIdRef.current = ownerId
     return () => {
-      cancelled = true
+      isMountedRef.current = false
+      if (coordinatorRef.current) {
+        coordinatorRef.current.dispose()
+        coordinatorRef.current = null
+      }
     }
-  }, [currentQuoteIdentity, selectedAddressId, selectedProductIds, withAuthRetry])
+  }, [ownerId])
 
+  useEffect(() => {
+    latestUserIdRef.current = user?.id ?? ''
+    getAccessTokenRef.current = getAccessToken
+    loadCartRef.current = loadCart
+  }, [user?.id, getAccessToken, loadCart])
+
+  useEffect(() => {
+    latestSnapshotRef.current = currentSnapshot
+  }, [currentSnapshot])
+
+  // Auto quote: đi qua cùng coordinator với manual retry
+  useEffect(() => {
+    const coordinator = getOrCreateCoordinator()
+    void coordinator.requestQuote(latestSnapshotRef.current)
+  }, [currentSnapshotKey, getOrCreateCoordinator])
+
+  // Manual retry: capture snapshot hiện tại lúc click và đi qua cùng coordinator
   const refetchQuote = useCallback(async () => {
-    if (!selectedAddressId || selectedProductIds.length === 0) return
-    const currentRequestId = ++quoteRequestIdRef.current
-    setQuoteStatus('loading')
-    setQuoteError(null)
+    const coordinator = getOrCreateCoordinator()
+    await coordinator.requestQuote(latestSnapshotRef.current)
+  }, [getOrCreateCoordinator])
 
-    try {
-      const result = await withAuthRetry((token) =>
-        getCheckoutQuote(selectedAddressId, token, selectedProductIds)
-      )
-      if (currentRequestId === quoteRequestIdRef.current) {
-        setQuote(result)
-        setQuoteStatus('ready')
-        setQuoteError(null)
-      }
-    } catch (err: unknown) {
-      if (currentRequestId === quoteRequestIdRef.current) {
-        const msg = mapCheckoutError(err)
-        setQuoteError(msg)
-        setQuoteStatus('error')
-      }
-    }
-  }, [selectedAddressId, selectedProductIds, withAuthRetry])
+  // Render guard chỉ quyết định có dùng quote/state của snapshot hiện hành hay không
+  const isQuoteMatchingCurrentSnapshot =
+    currentSnapshot !== null &&
+    quoteState.snapshotKey === currentSnapshot.key &&
+    doesQuoteMatchSnapshot(quoteState.provenancedQuote, currentSnapshot)
 
-  // Gating quyết định submit
+  const effectiveProvenancedQuote = isQuoteMatchingCurrentSnapshot
+    ? quoteState.provenancedQuote
+    : null
+
+  const quote: CheckoutQuoteDto | null = effectiveProvenancedQuote
+    ? effectiveProvenancedQuote.quote
+    : null
+
+  const quoteStatus: QuoteStatus =
+    currentSnapshot === null
+      ? 'idle'
+      : quoteState.snapshotKey !== currentSnapshot.key
+      ? 'loading'
+      : quoteState.status
+
+  const quoteError: string | null =
+    currentSnapshot !== null && quoteState.snapshotKey === currentSnapshot.key
+      ? quoteState.error
+      : null
+
+  const hasPendingQuoteRequest = quoteStatus === 'loading'
+
+  // Gating quyết định submit tạo đơn mới
   const canCreate = canCreateNewCartOrder({
-    isCustomer,
+    isAuthenticated,
+    ownerId,
     isSubmitting,
     activeAttempt,
+    cartStatus,
+    cart,
     selectedAddressId,
-    quote,
-    quoteStatus,
     selectedProductIds,
+    provenancedQuote: effectiveProvenancedQuote,
+    quoteStatus,
+    hasPendingQuoteRequest,
     notes,
   })
 
@@ -233,7 +280,7 @@ export function useCartCheckout() {
   })
 
   const handleCheckout = async (): Promise<CheckoutOrderDto | void> => {
-    if (isSubmitting || !user?.id) return
+    if (isSubmitting || !user?.id || user.id !== ownerId) return
 
     const submitSeq = ++submitSeqRef.current
     const isContextCurrent = () =>
@@ -247,8 +294,10 @@ export function useCartCheckout() {
       canCreate,
       canReplay,
       activeAttempt,
+      snapshot: currentSnapshot,
+      provenancedQuote: effectiveProvenancedQuote,
       selectedAddressId,
-      expectedCartVersion: quote?.cartVersion ?? cartVersion,
+      expectedCartVersion: currentSnapshot?.cartVersion ?? cart?.version ?? 0,
       paymentMethod,
       notes,
       selectedProductIds,
@@ -262,12 +311,13 @@ export function useCartCheckout() {
         setActiveAttempt(null)
         persistSavedCartAttempt(null, ownerId)
 
-        // Prune các sản phẩm vừa mua khỏi selection
+        // Prune các sản phẩm vừa mua khỏi selection (không đặt side effect trong state updater)
         if (order.items && order.items.length > 0) {
           const purchasedIds = new Set(order.items.map((i) => i.productId.toLowerCase()))
-          setSelectedProductIds((prev) =>
-            prev.filter((id) => !purchasedIds.has(id.toLowerCase()))
+          const remainingIds = selectedProductIds.filter(
+            (id) => !purchasedIds.has(id.toLowerCase())
           )
+          setSelectedProductIds(remainingIds)
         }
 
         // Tải lại giỏ hàng (giữ lại các sản phẩm chưa thanh toán)
@@ -284,8 +334,9 @@ export function useCartCheckout() {
       setIsSubmitting,
       isContextCurrent,
       onReconcileNeeded: () => {
-        loadCart().catch(() => {})
-        refetchQuote().catch(() => {})
+        loadCart()
+          .then(() => refetchQuote())
+          .catch(() => {})
       },
       onAddressNotFound: () => {
         loadAddresses().catch(() => {})
@@ -326,6 +377,7 @@ export function useCartCheckout() {
   return {
     user,
     cart,
+    cartStatus,
     selectedProductIds,
     activeAttempt,
     canCreate,
@@ -337,7 +389,7 @@ export function useCartCheckout() {
     addressError,
     loadAddresses,
     selectedAddressId,
-    setSelectedAddressId: setUserSelectedAddressId,
+    setSelectedAddressId,
     paymentMethod,
     setPaymentMethod,
     notes,

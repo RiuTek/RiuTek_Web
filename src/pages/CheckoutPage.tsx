@@ -126,6 +126,7 @@ export const CheckoutPage: React.FC = () => {
             isLoading={addressStatus === 'loading'}
             error={addressError}
             onRetry={handleRetryAddresses}
+            disabled={isSubmitting || Boolean(activeAttempt)}
           />
 
           <CheckoutPaymentSelector

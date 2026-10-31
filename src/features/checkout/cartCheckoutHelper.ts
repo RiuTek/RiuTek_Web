@@ -1,5 +1,7 @@
 import { ApiError } from '../../lib/api'
 import { CHECKOUT_ERROR_MESSAGES } from './checkoutConstants'
+import type { AuthStatus, UserRole } from '../auth/authTypes'
+import type { CartDto, CartStatus } from '../cart/cartTypes'
 import type {
   OrderStatus,
   PaymentMethod,
@@ -13,6 +15,8 @@ import type {
 } from './checkoutTypes'
 import type { SavePendingStripeData } from './stripeCheckoutSession'
 import { validateSelectedProductIds } from '../cart/cartSelectionHelper'
+
+export type QuoteStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export type CartAttemptStatus =
   | 'idle'
@@ -188,50 +192,524 @@ export function persistSavedCartAttempt(
 }
 
 /**
- * Điều kiện để ĐẶT ĐƠN MỚI TỪ GIỎ HÀNG:
- * - Khách hàng (Customer)
- * - Không đang submit, không có active attempt
- * - Có địa chỉ được chọn
- * - Quote sẵn sàng, canCheckout === true, items không rỗng
- * - SelectedProductIds nonempty (1..50)
- * - Notes <= 1000 ký tự
+ * Kiểm tra quyền thực hiện Cart Checkout theo đúng contract BE (OrderAuthHelper.ValidateActiveUserAsync):
+ * Áp dụng cho mọi tài khoản đã xác thực hợp lệ (Customer, Staff, Admin).
+ * Các trạng thái checking, anonymous, unavailable không đủ điều kiện tạo đơn mới.
  */
-export function canCreateNewCartOrder(params: {
-  isCustomer: boolean
-  isSubmitting: boolean
-  activeAttempt: ActiveCartAttempt | null
-  selectedAddressId: string | null
-  quote: CheckoutQuoteDto | null
-  quoteStatus: string
-  selectedProductIds: string[]
-  notes: string
+export function isCartCheckoutEligible(params: {
+  authStatus: AuthStatus | string
+  user: { id: string; role?: UserRole | string } | null
 }): boolean {
-  const {
-    isCustomer,
-    isSubmitting,
-    activeAttempt,
-    selectedAddressId,
-    quote,
-    quoteStatus,
-    selectedProductIds,
-    notes,
-  } = params
+  if (params.authStatus !== 'authenticated') return false
+  if (!params.user || typeof params.user.id !== 'string' || !params.user.id.trim()) {
+    return false
+  }
+  return true
+}
 
-  if (!isCustomer || isSubmitting || activeAttempt !== null) return false
-  if (!selectedAddressId) return false
-  if (notes.length > 1000) return false
-  if (selectedProductIds.length === 0 || selectedProductIds.length > 50) return false
-  if (!quote || quoteStatus !== 'ready' || !quote.canCheckout || quote.items.length === 0) {
+/**
+ * Snapshot định danh một ngữ cảnh báo giá hợp lệ:
+ * S = { ownerId, addressId, sorted normalized selectedProductIds, expected cartVersion }
+ */
+export interface CartQuoteSnapshot {
+  key: string
+  ownerId: string
+  addressId: string
+  selectedProductIds: string[]
+  normalizedSortedIds: string[]
+  cartVersion: number
+}
+
+export interface CreateCartQuoteSnapshotParams {
+  isAuthenticated: boolean
+  ownerId: string
+  addressId: string | null
+  selectedProductIds: string[]
+  cartStatus: CartStatus | string
+  cart: Pick<CartDto, 'version' | 'items'> | null
+}
+
+/**
+ * Khởi tạo snapshot báo giá chỉ khi:
+ * - Phiên đã xác thực hợp lệ và có ownerId
+ * - Giỏ hàng đã tải thành công (cartStatus === 'ready', cart !== null, version >= 1, items không rỗng)
+ * - Có địa chỉ nhận hàng hợp lệ
+ * - selectedProductIds có 1..50 UUID hợp lệ, không trùng lặp (copy mảng để tránh mutation ngoài ý muốn)
+ */
+export function createCartQuoteSnapshot(
+  params: CreateCartQuoteSnapshotParams
+): CartQuoteSnapshot | null {
+  if (!params.isAuthenticated) return null
+
+  const cleanOwnerId = typeof params.ownerId === 'string' ? params.ownerId.trim() : ''
+  if (!cleanOwnerId) return null
+
+  if (params.cartStatus !== 'ready' || !params.cart) return null
+  if (
+    typeof params.cart.version !== 'number' ||
+    !Number.isInteger(params.cart.version) ||
+    params.cart.version < 1
+  ) {
+    return null
+  }
+  if (!Array.isArray(params.cart.items) || params.cart.items.length === 0) {
+    return null
+  }
+
+  const cleanAddressId =
+    typeof params.addressId === 'string' ? params.addressId.trim() : ''
+  if (!cleanAddressId) return null
+
+  if (
+    !Array.isArray(params.selectedProductIds) ||
+    params.selectedProductIds.length === 0 ||
+    params.selectedProductIds.length > 50
+  ) {
+    return null
+  }
+
+  const validSelectedIds = validateSelectedProductIds(params.selectedProductIds)
+  if (
+    validSelectedIds.length === 0 ||
+    validSelectedIds.length !== params.selectedProductIds.length
+  ) {
+    return null
+  }
+
+  const selectedCopy = [...validSelectedIds]
+  const normalizedSortedIds = selectedCopy.map((id) => id.toLowerCase()).sort()
+  const key = `${cleanOwnerId.toLowerCase()}:${cleanAddressId.toLowerCase()}:${params.cart.version}:${normalizedSortedIds.join(',')}`
+
+  return {
+    key,
+    ownerId: cleanOwnerId,
+    addressId: cleanAddressId,
+    selectedProductIds: selectedCopy,
+    normalizedSortedIds,
+    cartVersion: params.cart.version,
+  }
+}
+
+/**
+ * Quote kèm theo provenance (snapshot và key đã tạo ra nó).
+ */
+export interface ProvenancedCartQuote {
+  quote: CheckoutQuoteDto
+  snapshotKey: string
+  snapshot: CartQuoteSnapshot
+}
+
+/**
+ * Kiểm tra chặt chẽ xem một ProvenancedCartQuote có khớp chính xác với snapshot hiện hành S hay không:
+ * 1. Provenance snapshotKey và ownerId khớp S
+ * 2. quote.addressId == S.addressId (case-insensitive, trimmed)
+ * 3. quote.cartVersion == S.cartVersion hiện hành
+ * 4. Tập quote.items.productId KHỚP CHÍNH XÁC hai chiều với S.selectedProductIds (không duplicate, không thiếu, không thừa)
+ */
+export function doesQuoteMatchSnapshot(
+  provenancedQuote: ProvenancedCartQuote | null,
+  currentSnapshot: CartQuoteSnapshot | null
+): boolean {
+  if (!provenancedQuote || !currentSnapshot) return false
+  if (provenancedQuote.snapshotKey !== currentSnapshot.key) return false
+  if (
+    provenancedQuote.snapshot.ownerId.trim().toLowerCase() !==
+    currentSnapshot.ownerId.trim().toLowerCase()
+  ) {
     return false
   }
 
-  // Đảm bảo quote items khớp với các sản phẩm được chọn
-  const quoteProductIds = new Set(quote.items.map((i) => i.productId.toLowerCase()))
-  if (!selectedProductIds.every((id) => quoteProductIds.has(id.toLowerCase()))) {
+  const { quote } = provenancedQuote
+  if (!quote || typeof quote.addressId !== 'string') return false
+  if (
+    quote.addressId.trim().toLowerCase() !==
+    currentSnapshot.addressId.trim().toLowerCase()
+  ) {
+    return false
+  }
+
+  if (
+    typeof quote.cartVersion !== 'number' ||
+    quote.cartVersion !== currentSnapshot.cartVersion
+  ) {
+    return false
+  }
+
+  if (!Array.isArray(quote.items) || quote.items.length === 0) return false
+  if (quote.items.length !== currentSnapshot.normalizedSortedIds.length) {
+    return false
+  }
+
+  const seenQuoteIds = new Set<string>()
+  const normalizedQuoteIds: string[] = []
+
+  for (const item of quote.items) {
+    if (!item || typeof item.productId !== 'string' || !item.productId.trim()) {
+      return false
+    }
+    const normalizedId = item.productId.trim().toLowerCase()
+    if (seenQuoteIds.has(normalizedId)) {
+      return false
+    }
+    seenQuoteIds.add(normalizedId)
+    normalizedQuoteIds.push(normalizedId)
+  }
+
+  normalizedQuoteIds.sort()
+  for (let i = 0; i < currentSnapshot.normalizedSortedIds.length; i++) {
+    if (normalizedQuoteIds[i] !== currentSnapshot.normalizedSortedIds[i]) {
+      return false
+    }
+  }
+
+  return true
+}
+
+export interface CanCreateNewCartOrderParams {
+  isAuthenticated: boolean
+  ownerId: string
+  isSubmitting: boolean
+  activeAttempt: ActiveCartAttempt | null
+  cartStatus: CartStatus | string
+  cart: Pick<CartDto, 'version' | 'items'> | null
+  selectedAddressId: string | null
+  selectedProductIds: string[]
+  provenancedQuote: ProvenancedCartQuote | null
+  quoteStatus: QuoteStatus | string
+  hasPendingQuoteRequest?: boolean
+  notes: string
+}
+
+/**
+ * Điều kiện để ĐẶT ĐƠN MỚI TỪ GIỎ HÀNG (Section 3):
+ * 1. Phiên authenticated đúng owner, không active attempt và không submitting.
+ * 2. Cart đã tải thành công, selection nonempty hợp lệ, địa chỉ hiện hành hợp lệ.
+ * 3. Quote ready và provenance khớp snapshot hiện hành; không có request mới hơn đang invalidating quote.
+ * 4. quote.addressId == S.addressId; quote.cartVersion == S.cartVersion hiện hành.
+ * 5. Tập quote.items.productId KHỚP CHÍNH XÁC selection S (hai chiều, không duplicate, không thiếu/thừa).
+ * 6. quote.canCheckout === true và notes <= 1000 ký tự.
+ */
+export function canCreateNewCartOrder(params: CanCreateNewCartOrderParams): boolean {
+  const {
+    isAuthenticated,
+    ownerId,
+    isSubmitting,
+    activeAttempt,
+    cartStatus,
+    cart,
+    selectedAddressId,
+    selectedProductIds,
+    provenancedQuote,
+    quoteStatus,
+    hasPendingQuoteRequest = false,
+    notes,
+  } = params
+
+  if (!isAuthenticated || isSubmitting || activeAttempt !== null) return false
+  if (typeof notes !== 'string' || notes.length > 1000) return false
+  if (quoteStatus !== 'ready' || hasPendingQuoteRequest) return false
+
+  const snapshot = createCartQuoteSnapshot({
+    isAuthenticated,
+    ownerId,
+    addressId: selectedAddressId,
+    selectedProductIds,
+    cartStatus,
+    cart,
+  })
+  if (!snapshot) return false
+
+  if (!doesQuoteMatchSnapshot(provenancedQuote, snapshot)) {
+    return false
+  }
+
+  if (!provenancedQuote || !provenancedQuote.quote.canCheckout) {
     return false
   }
 
   return true
+}
+
+export function mapCheckoutQuoteError(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code && CHECKOUT_ERROR_MESSAGES[err.code]) {
+      return CHECKOUT_ERROR_MESSAGES[err.code]
+    }
+    if (err.description) return err.description
+    if (err.message) return err.message
+  }
+  if (err instanceof Error) {
+    return err.message
+  }
+  return 'Đã xảy ra lỗi trong quá trình xử lý đơn hàng. Vui lòng thử lại.'
+}
+
+export interface CartQuoteCoordinatorState {
+  status: QuoteStatus
+  provenancedQuote: ProvenancedCartQuote | null
+  error: string | null
+  snapshotKey: string | null
+}
+
+export interface CartQuoteCoordinatorDeps {
+  isContextCurrent: () => boolean
+  getCurrentSnapshot: () => CartQuoteSnapshot | null
+  getAccessToken: (forceRefresh: boolean) => Promise<string | null>
+  getCheckoutQuote: (
+    addressId: string,
+    token: string,
+    selectedProductIds: string[],
+    signal?: AbortSignal
+  ) => Promise<CheckoutQuoteDto>
+  onStateChange: (state: CartQuoteCoordinatorState) => void
+  onVersionMismatchSync?: (info: {
+    snapshot: CartQuoteSnapshot
+    quoteCartVersion: number
+  }) => Promise<void> | void
+  maxConsecutiveVersionMismatchSyncs?: number
+}
+
+export interface CartQuoteCoordinator {
+  requestQuote: (snapshotInput?: CartQuoteSnapshot | null) => Promise<void>
+  invalidate: (notifyIdle?: boolean) => number
+  dispose: () => void
+  hasPendingRequest: () => boolean
+  getCurrentSequence: () => number
+}
+
+/**
+ * Production request coordinator dùng chung cho cả useEffect (auto quote) và refetchQuote (manual retry).
+ */
+export function createCartQuoteCoordinator(
+  deps: CartQuoteCoordinatorDeps
+): CartQuoteCoordinator {
+  let currentSeq = 0
+  let activeRequestSeq: number | null = null
+  let activeAbortController: AbortController | null = null
+  let disposed = false
+  const syncedMismatchSnapshotKeys = new Set<string>()
+  let consecutiveVersionMismatchCount = 0
+  const maxMismatchSyncs = deps.maxConsecutiveVersionMismatchSyncs ?? 2
+
+  const hasPendingRequest = (): boolean => {
+    return !disposed && activeRequestSeq !== null && activeRequestSeq === currentSeq
+  }
+
+  const getCurrentSequence = (): number => currentSeq
+
+  const invalidate = (notifyIdle = true): number => {
+    const seq = ++currentSeq
+    activeRequestSeq = null
+    if (activeAbortController) {
+      activeAbortController.abort()
+      activeAbortController = null
+    }
+    if (notifyIdle && !disposed && deps.isContextCurrent()) {
+      deps.onStateChange({
+        status: 'idle',
+        provenancedQuote: null,
+        error: null,
+        snapshotKey: null,
+      })
+    }
+    return seq
+  }
+
+  const dispose = (): void => {
+    disposed = true
+    currentSeq += 1
+    activeRequestSeq = null
+    if (activeAbortController) {
+      activeAbortController.abort()
+      activeAbortController = null
+    }
+  }
+
+  const requestQuote = async (
+    snapshotInput?: CartQuoteSnapshot | null
+  ): Promise<void> => {
+    const snapshot =
+      snapshotInput !== undefined ? snapshotInput : deps.getCurrentSnapshot()
+
+    if (disposed || !deps.isContextCurrent()) {
+      invalidate(false)
+      return
+    }
+
+    // Nếu snapshot mới rỗng (selection [], address null, cart chưa ready...):
+    // Vô hiệu hóa quote ngay, tăng sequence để hủy mọi request đang bay và đưa về idle.
+    if (!snapshot) {
+      invalidate(true)
+      return
+    }
+
+    const seq = ++currentSeq
+    activeRequestSeq = seq
+
+    if (activeAbortController) {
+      activeAbortController.abort()
+    }
+    const abortController = new AbortController()
+    activeAbortController = abortController
+
+    const requestProductIds = [...snapshot.selectedProductIds]
+
+    deps.onStateChange({
+      status: 'loading',
+      provenancedQuote: null,
+      error: null,
+      snapshotKey: snapshot.key,
+    })
+
+    const isRequestCurrent = (): boolean => {
+      if (disposed) return false
+      if (!deps.isContextCurrent()) return false
+      if (currentSeq !== seq) return false
+      const liveSnapshot = deps.getCurrentSnapshot()
+      if (!liveSnapshot || liveSnapshot.key !== snapshot.key) return false
+      return true
+    }
+
+    try {
+      let token = await deps.getAccessToken(false)
+      if (!isRequestCurrent()) return
+      if (!token) {
+        throw new Error('Chưa đăng nhập.')
+      }
+
+      let result: CheckoutQuoteDto
+      try {
+        result = await deps.getCheckoutQuote(
+          snapshot.addressId,
+          token,
+          requestProductIds,
+          abortController.signal
+        )
+      } catch (err: unknown) {
+        if (!isRequestCurrent()) return
+        if (err instanceof ApiError && err.status === 401) {
+          token = await deps.getAccessToken(true)
+          if (!isRequestCurrent()) return
+          if (!token) {
+            throw new Error('Chưa đăng nhập.', { cause: err })
+          }
+          result = await deps.getCheckoutQuote(
+            snapshot.addressId,
+            token,
+            requestProductIds,
+            abortController.signal
+          )
+        } else {
+          throw err
+        }
+      }
+
+      if (!isRequestCurrent()) return
+
+      // Nếu quote trả về cartVersion khác với snapshot.cartVersion hiện hành:
+      // Không cho phép submit bằng quote này trên UI cart cũ; chuyển sang trạng thái cần đồng bộ
+      if (
+        typeof result.cartVersion !== 'number' ||
+        result.cartVersion !== snapshot.cartVersion
+      ) {
+        const canSyncThisSnapshot =
+          !syncedMismatchSnapshotKeys.has(snapshot.key) &&
+          consecutiveVersionMismatchCount < maxMismatchSyncs
+
+        if (activeRequestSeq === seq) {
+          activeRequestSeq = null
+        }
+
+        deps.onStateChange({
+          status: 'error',
+          provenancedQuote: null,
+          error: canSyncThisSnapshot
+            ? 'Giỏ hàng vừa được cập nhật ở phiên khác. Đang đồng bộ lại dữ liệu giỏ hàng...'
+            : 'Giỏ hàng đã thay đổi so với phiên hiện tại. Vui lòng kiểm tra lại giỏ hàng.',
+          snapshotKey: snapshot.key,
+        })
+
+        if (canSyncThisSnapshot && deps.onVersionMismatchSync) {
+          syncedMismatchSnapshotKeys.add(snapshot.key)
+          consecutiveVersionMismatchCount += 1
+          try {
+            await deps.onVersionMismatchSync({
+              snapshot,
+              quoteCartVersion: result.cartVersion,
+            })
+          } catch {
+            return
+          }
+          if (disposed || !deps.isContextCurrent() || currentSeq !== seq) return
+          const updatedSnapshot = deps.getCurrentSnapshot()
+          if (updatedSnapshot && updatedSnapshot.key !== snapshot.key) {
+            await requestQuote(updatedSnapshot)
+          }
+        }
+        return
+      }
+
+      const candidateProvenanced: ProvenancedCartQuote = {
+        quote: result,
+        snapshotKey: snapshot.key,
+        snapshot,
+      }
+
+      if (!doesQuoteMatchSnapshot(candidateProvenanced, snapshot)) {
+        if (activeRequestSeq === seq) {
+          activeRequestSeq = null
+        }
+        deps.onStateChange({
+          status: 'error',
+          provenancedQuote: null,
+          error:
+            'Dữ liệu báo giá phản hồi không khớp với lựa chọn hiện tại. Vui lòng thử lại.',
+          snapshotKey: snapshot.key,
+        })
+        return
+      }
+
+      consecutiveVersionMismatchCount = 0
+      if (activeRequestSeq === seq) {
+        activeRequestSeq = null
+      }
+      deps.onStateChange({
+        status: 'ready',
+        provenancedQuote: candidateProvenanced,
+        error: null,
+        snapshotKey: snapshot.key,
+      })
+    } catch (err: unknown) {
+      if (!isRequestCurrent()) return
+      if (err instanceof Error && err.name === 'AbortError') return
+
+      if (activeRequestSeq === seq) {
+        activeRequestSeq = null
+      }
+      const msg = mapCheckoutQuoteError(err)
+      deps.onStateChange({
+        status: 'error',
+        provenancedQuote: null,
+        error: msg,
+        snapshotKey: snapshot.key,
+      })
+    } finally {
+      if (activeRequestSeq === seq) {
+        activeRequestSeq = null
+      }
+      if (activeAbortController === abortController) {
+        activeAbortController = null
+      }
+    }
+  }
+
+  return {
+    requestQuote,
+    invalidate,
+    dispose,
+    hasPendingRequest,
+    getCurrentSequence,
+  }
 }
 
 /**
@@ -293,6 +771,8 @@ export interface CartSubmitDeps {
   canCreate: boolean
   canReplay: boolean
   activeAttempt: ActiveCartAttempt | null
+  snapshot?: CartQuoteSnapshot | null
+  provenancedQuote?: ProvenancedCartQuote | null
   selectedAddressId: string | null
   expectedCartVersion: number
   paymentMethod: PaymentMethod
@@ -323,7 +803,7 @@ export interface CartSubmitDeps {
  * Core async submit handler cho Checkout Cart theo selectedProductIds.
  */
 export async function executeCartCheckoutSubmit(deps: CartSubmitDeps): Promise<void> {
-  if (deps.isSubmitting || !deps.user?.id) return
+  if (deps.isSubmitting || !deps.user?.id || deps.user.id !== deps.ownerId) return
 
   let attemptKey: string
   let attemptPayload: CheckoutCartRequest
@@ -341,16 +821,46 @@ export async function executeCartCheckoutSubmit(deps: CartSubmitDeps): Promise<v
     }
     deps.setActiveAttempt(replayingAttempt)
     deps.persistSavedAttempt(replayingAttempt, deps.ownerId)
-  } else if (deps.canCreate) {
+  } else if (deps.canCreate && !deps.activeAttempt) {
+    if (typeof deps.notes !== 'string' || deps.notes.length > 1000) return
+
+    // Nếu truyền snapshot/provenancedQuote: bắt buộc xác thực khớp tuyệt đối trước khi tạo attempt mới
+    if (deps.snapshot !== undefined || deps.provenancedQuote !== undefined) {
+      if (
+        !deps.snapshot ||
+        !deps.provenancedQuote ||
+        !doesQuoteMatchSnapshot(deps.provenancedQuote, deps.snapshot) ||
+        !deps.provenancedQuote.quote.canCheckout
+      ) {
+        return
+      }
+    }
+
+    const effectiveAddressId = deps.snapshot?.addressId ?? deps.selectedAddressId
+    const effectiveCartVersion =
+      deps.snapshot?.cartVersion ?? deps.expectedCartVersion
+    const effectiveSelectedIds = deps.snapshot
+      ? [...deps.snapshot.selectedProductIds]
+      : validateSelectedProductIds(deps.selectedProductIds)
+
+    if (
+      !effectiveAddressId ||
+      !Number.isInteger(effectiveCartVersion) ||
+      effectiveCartVersion < 1 ||
+      effectiveSelectedIds.length === 0
+    ) {
+      return
+    }
+
     const cleanNotes = deps.notes.trim()
     const uuidGen = deps.generateUUID || (() => crypto.randomUUID())
     attemptKey = uuidGen()
     attemptPayload = {
-      addressId: deps.selectedAddressId!,
-      expectedCartVersion: deps.expectedCartVersion,
+      addressId: effectiveAddressId,
+      expectedCartVersion: effectiveCartVersion,
       paymentMethod: deps.paymentMethod,
       notes: cleanNotes.length > 0 ? cleanNotes : null,
-      selectedProductIds: deps.selectedProductIds,
+      selectedProductIds: effectiveSelectedIds,
     }
 
     const newAttempt: ActiveCartAttempt = {
