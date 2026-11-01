@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
+  FileSpreadsheet,
   FolderTree,
   LogOut,
   Menu,
@@ -37,6 +38,13 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: 'Thêm sản phẩm mới',
     description: 'Tạo mới 9 loại linh kiện',
     icon: PlusCircle,
+    end: true,
+  },
+  {
+    to: '/admin/product-imports',
+    label: 'Nhập sản phẩm Excel',
+    description: 'Import Excel & ghép thư mục ảnh SKU',
+    icon: FileSpreadsheet,
     end: true,
   },
   {

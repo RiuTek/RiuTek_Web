@@ -60,6 +60,48 @@ export const ADMIN_ERROR_MESSAGES: Record<string, string> = {
   'Inventory.InvalidDelta': 'Biến động tồn kho phải là số nguyên khác 0.',
   'Inventory.InvalidNote':
     'Ghi chú lý do điều chỉnh kho là bắt buộc và phải từ 3 đến 500 ký tự.',
+  'ProductImport.MissingFile': 'File Excel tải lên không được để trống.',
+  'ProductImport.InvalidFileExtension': 'Chỉ chấp nhận file Excel định dạng .xlsx.',
+  'ProductImport.FileTooLarge': 'Dung lượng file Excel không được vượt quá 5 MiB.',
+  'ProductImport.ImageMappingsTooLarge':
+    'Dữ liệu ánh xạ ảnh (imageMappings) vượt quá giới hạn 512 KiB.',
+  'ProductImport.InvalidImageMappingsJson':
+    'Dữ liệu ánh xạ ảnh (imageMappings) không đúng định dạng JSON hợp lệ.',
+  'ProductImport.TooManyImageMappings':
+    'Số lượng SKU trong danh sách ánh xạ ảnh vượt quá giới hạn 1.000 SKU.',
+  'ProductImport.TooManyObjectKeys':
+    'Tổng số lượng ảnh trong danh sách ánh xạ vượt quá giới hạn 11.000 tệp.',
+  'ProductImport.DuplicateImageMappingSku':
+    'Mã SKU bị lặp lại trong danh sách ánh xạ ảnh.',
+  'ProductImport.UnknownImageMappingSku':
+    'Mã SKU trong danh sách ánh xạ ảnh không tồn tại trong sheet Products.',
+  'ProductImport.MissingPrimaryObjectKey':
+    'SKU trong danh sách ánh xạ ảnh thiếu ảnh chính (primaryObjectKey).',
+  'ProductImport.InvalidObjectKey':
+    'ObjectKey của ảnh không hợp lệ hoặc nằm ngoài thư mục quản lý.',
+  'ProductImport.TooManyAdditionalImages':
+    'Mỗi SKU chỉ được phép gắn tối đa 10 ảnh phụ.',
+  'ProductImport.DuplicateObjectKey':
+    'ObjectKey ảnh phụ bị trùng với ảnh chính hoặc ảnh phụ khác của cùng SKU.',
+  'ProductImport.MediaNotFound':
+    'Không tìm thấy file ảnh đã tải lên trên kho lưu trữ R2.',
+  'ProductImport.InvalidMediaMetadata':
+    'Định dạng MIME hoặc dung lượng của ảnh trên kho lưu trữ không hợp lệ.',
+  'ProductImport.StaleValidation':
+    'Danh mục hoặc dữ liệu workbook đã thay đổi. Vui lòng kiểm tra (validate) lại trước khi import.',
+  'ProductImport.ConcurrentConflict':
+    'SKU hoặc đường dẫn (slug) vừa được tạo bởi một yêu cầu khác. Không có sản phẩm nào trong lô được tạo.',
+  'ProductMedia.StorageDisabled':
+    'Dịch vụ lưu trữ ảnh sản phẩm (Cloudflare R2) chưa được cấu hình hoặc đang tạm ngưng.',
+  'ProductMedia.StorageUnavailable':
+    'Không thể kết nối tới dịch vụ lưu trữ ảnh sản phẩm (Cloudflare R2). Vui lòng thử lại sau.',
+  'ProductMedia.FileTooLarge':
+    'Dung lượng file ảnh vượt quá giới hạn cho phép của kho lưu trữ (tối đa 5 MiB).',
+  'ProductMedia.InvalidKey': 'Mã đối tượng ảnh (ObjectKey) không hợp lệ.',
+  'ProductMedia.InvalidMetadata':
+    'Metadata hoặc định dạng của file ảnh tải lên không hợp lệ.',
+  'ProductMedia.NotFound':
+    'Không tìm thấy file ảnh trên kho lưu trữ R2 để xác nhận.',
 }
 
 export function mapAdminApiError(
@@ -68,10 +110,27 @@ export function mapAdminApiError(
 ): string {
   if (err instanceof ApiError) {
     if (err.code && ADMIN_ERROR_MESSAGES[err.code]) {
-      return ADMIN_ERROR_MESSAGES[err.code]
+      return `${ADMIN_ERROR_MESSAGES[err.code]}${
+        err.description && err.description !== ADMIN_ERROR_MESSAGES[err.code]
+          ? ` (${err.description})`
+          : ''
+      }`
     }
     if (err.description && err.description.trim().length > 0) {
-      return err.description.trim()
+      return err.code
+        ? `[${err.code}] ${err.description.trim()}`
+        : err.description.trim()
+    }
+    if (
+      err.problemDetails?.errors &&
+      Object.keys(err.problemDetails.errors).length > 0
+    ) {
+      const messages = Object.values(err.problemDetails.errors)
+        .flat()
+        .filter((m) => typeof m === 'string' && m.trim().length > 0)
+      if (messages.length > 0) {
+        return messages.join(' ')
+      }
     }
     if (err.message && err.message.trim().length > 0) {
       return err.message.trim()

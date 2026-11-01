@@ -1,9 +1,23 @@
-import { apiClient, ApiError, type PagedResult } from '../../lib/api'
+import {
+  apiClient,
+  apiFetchBlob,
+  ApiError,
+  type ApiBlobResponse,
+  type PagedResult,
+} from '../../lib/api'
 import type { Category, ProductDetail } from '../products/productTypes'
 import type {
   AdjustStockRequest,
+  ConfirmProductMediaUploadRequest,
   CreateCategoryRequest,
+  CreateProductMediaUploadRequest,
   CreateProductRequest,
+  ProductImportCommitResultDto,
+  ProductImportImageMappingDto,
+  ProductImportInspectResultDto,
+  ProductImportValidationResultDto,
+  ProductMediaDto,
+  ProductMediaUploadDto,
   StockAdjustmentResultDto,
   StockMovementDto,
   StockMovementsQueryParams,
@@ -175,6 +189,148 @@ export async function getProductStockMovements(
     `/products/${encodeURIComponent(cleanId)}/stock-movements`,
     {
       params: queryParams,
+      token,
+      signal,
+    }
+  )
+}
+
+/**
+ * GET /api/v1/product-imports/template (Binary .xlsx v1.0)
+ */
+export async function downloadProductImportTemplate(
+  token: string,
+  signal?: AbortSignal
+): Promise<ApiBlobResponse> {
+  return apiFetchBlob('/product-imports/template', {
+    token,
+    signal,
+    fallbackFileName: 'riutek-product-import-v1.0.xlsx',
+  })
+}
+
+function createImportFormData(
+  file: File | Blob,
+  fileName?: string,
+  imageMappings?: ProductImportImageMappingDto[] | null
+): FormData {
+  const formData = new FormData()
+  const resolvedName =
+    fileName?.trim() ||
+    (typeof File !== 'undefined' && file instanceof File && file.name
+      ? file.name
+      : 'products-import.xlsx')
+
+  formData.append('file', file, resolvedName)
+
+  if (Array.isArray(imageMappings) && imageMappings.length > 0) {
+    // Contract BE: imageMappings là STRING JSON trong FormData (không phải Blob file)
+    formData.append('imageMappings', JSON.stringify(imageMappings))
+  }
+
+  return formData
+}
+
+/**
+ * POST /api/v1/product-imports/inspect
+ */
+export async function inspectProductImportWorkbook(
+  file: File | Blob,
+  token: string,
+  fileName?: string,
+  signal?: AbortSignal
+): Promise<ProductImportInspectResultDto> {
+  const formData = createImportFormData(file, fileName, null)
+  return apiClient.post<ProductImportInspectResultDto>(
+    '/product-imports/inspect',
+    formData,
+    {
+      token,
+      signal,
+    }
+  )
+}
+
+/**
+ * POST /api/v1/product-imports/validate
+ */
+export async function validateProductImport(params: {
+  file: File | Blob
+  fileName?: string
+  imageMappings?: ProductImportImageMappingDto[] | null
+  token: string
+  signal?: AbortSignal
+}): Promise<ProductImportValidationResultDto> {
+  const formData = createImportFormData(
+    params.file,
+    params.fileName,
+    params.imageMappings
+  )
+  return apiClient.post<ProductImportValidationResultDto>(
+    '/product-imports/validate',
+    formData,
+    {
+      token: params.token,
+      signal: params.signal,
+    }
+  )
+}
+
+/**
+ * POST /api/v1/product-imports/import
+ */
+export async function commitProductImport(params: {
+  file: File | Blob
+  fileName?: string
+  imageMappings?: ProductImportImageMappingDto[] | null
+  token: string
+  signal?: AbortSignal
+}): Promise<ProductImportCommitResultDto> {
+  const formData = createImportFormData(
+    params.file,
+    params.fileName,
+    params.imageMappings
+  )
+  return apiClient.post<ProductImportCommitResultDto>(
+    '/product-imports/import',
+    formData,
+    {
+      token: params.token,
+      signal: params.signal,
+    }
+  )
+}
+
+/**
+ * POST /api/v1/product-media/upload-requests
+ */
+export async function createProductMediaUploadRequest(
+  request: CreateProductMediaUploadRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<ProductMediaUploadDto> {
+  return apiClient.post<ProductMediaUploadDto>(
+    '/product-media/upload-requests',
+    request,
+    {
+      token,
+      signal,
+    }
+  )
+}
+
+/**
+ * POST /api/v1/product-media/confirmations
+ */
+export async function confirmProductMediaUpload(
+  request: ConfirmProductMediaUploadRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<ProductMediaDto> {
+  return apiClient.post<ProductMediaDto>(
+    '/product-media/confirmations',
+    request,
+    {
       token,
       signal,
     }

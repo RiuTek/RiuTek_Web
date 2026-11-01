@@ -246,4 +246,99 @@ export interface ProductFormDraft {
 
 export type AdminProductFormMode = 'create' | 'edit'
 
+export type BackendComponentTypeName =
+  | 'Cpu'
+  | 'Motherboard'
+  | 'Gpu'
+  | 'Ram'
+  | 'Storage'
+  | 'Psu'
+  | 'Case'
+  | 'Cooler'
+  | 'Accessory'
+
+export interface ProductImportErrorDto {
+  sheet: string
+  row: number
+  column: string | null
+  sku: string | null
+  code: string
+  message: string
+}
+
+export interface ProductImportInspectRowDto {
+  sheet: string
+  row: number
+  sku: string
+  name: string
+  componentType: BackendComponentTypeName | string
+  primaryImageFile: string | null
+  imageUrl: string | null
+}
+
+export interface ProductImportInspectResultDto {
+  templateVersion: string
+  isValid: boolean
+  rows: ProductImportInspectRowDto[]
+  errors: ProductImportErrorDto[]
+  errorsTruncated: boolean
+}
+
+export interface ProductImportImageMappingDto {
+  sku: string
+  primaryObjectKey: string
+  additionalObjectKeys: string[]
+}
+
+export interface ProductImportValidationResultDto {
+  templateVersion: string
+  isValid: boolean
+  totalRows: number
+  validRows: number
+  invalidRows: number
+  errorsTruncated: boolean
+  errors: ProductImportErrorDto[]
+}
+
+export interface ProductImportCreatedProductDto {
+  id: string
+  sku: string
+  slug: string
+}
+
+export interface ProductImportCommitResultDto {
+  templateVersion: string
+  isCommitted: boolean
+  createdCount: number
+  createdProducts: ProductImportCreatedProductDto[]
+  validation: ProductImportValidationResultDto
+}
+
+export interface CreateProductMediaUploadRequest {
+  fileName: string
+  contentType: string
+  contentLength: number
+}
+
+export interface ProductMediaUploadDto {
+  objectKey: string
+  uploadUrl: string
+  publicUrl: string
+  expiresAt: string
+  httpMethod: string
+  requiredHeaders: Record<string, string>
+}
+
+export interface ConfirmProductMediaUploadRequest {
+  objectKey: string
+}
+
+export interface ProductMediaDto {
+  objectKey: string
+  publicUrl: string
+  contentType: string
+  contentLength: number
+  eTag: string | null
+}
+
 export type { ProductDetail }

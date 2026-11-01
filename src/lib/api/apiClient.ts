@@ -165,6 +165,184 @@ export async function apiRequest<TResponse = unknown>(
   return (await response.text()) as unknown as TResponse
 }
 
+export interface ApiBlobResponse {
+  blob: Blob
+  contentType: string
+  contentDisposition: string | null
+  fileName: string
+}
+
+/**
+ * Trích xuất tên file an toàn từ header Content-Disposition (hỗ trợ cả filename*=UTF-8''... và filename="...").
+ */
+export function parseContentDispositionFileName(
+  contentDisposition: string | null | undefined,
+  fallbackFileName = 'riutek-product-import-v1.0.xlsx'
+): string {
+  const safeFallback = fallbackFileName.trim() || 'riutek-product-import-v1.0.xlsx'
+  if (!contentDisposition || typeof contentDisposition !== 'string') {
+    return safeFallback
+  }
+
+  let extracted = ''
+
+  // 1. Ưu tiên chuẩn RFC 5987: filename*=UTF-8''...
+  const utf8Match = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;\r\n]+)/i)
+  if (utf8Match?.[1]) {
+    try {
+      extracted = decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''))
+    } catch {
+      extracted = utf8Match[1].trim().replace(/^["']|["']$/g, '')
+    }
+  }
+
+  // 2. Fallback sang filename="..." hoặc filename=...
+  if (!extracted) {
+    const quotedMatch = contentDisposition.match(/filename\s*=\s*"([^"\r\n]+)"/i)
+    if (quotedMatch?.[1]) {
+      extracted = quotedMatch[1].trim()
+    } else {
+      const plainMatch = contentDisposition.match(/filename\s*=\s*([^;\r\n]+)/i)
+      if (plainMatch?.[1]) {
+        extracted = plainMatch[1].trim().replace(/^["']|["']$/g, '')
+      }
+    }
+  }
+
+  // Làm sạch ký tự đường dẫn nguy hiểm (/, \, .., ký tự điều khiển)
+  const sanitized = Array.from(extracted)
+    .filter((ch) => ch.charCodeAt(0) >= 32)
+    .join('')
+    .replace(/[/\\?%*:|"<>]/g, '_')
+    .replace(/\.{2,}/g, '.')
+    .trim()
+
+  if (!sanitized || sanitized === '.' || sanitized === '..') {
+    return safeFallback
+  }
+
+  return sanitized
+}
+
+/**
+ * Tải file nhị phân (Blob) có xác thực qua API proxy, giữ nguyên quy ước xử lý lỗi JSON/ProblemDetails
+ * và tuyệt đối không tải nhầm phản hồi lỗi JSON thành file .xlsx.
+ */
+export async function apiFetchBlob(
+  path: string,
+  options: RequestOptions & { fallbackFileName?: string } = {}
+): Promise<ApiBlobResponse> {
+  const baseUrl = resolveApiBaseUrl()
+  const url = buildRequestUrl(baseUrl, path, options.params)
+
+  const headers = new Headers(options.headers)
+  if (!headers.has('Accept')) {
+    headers.set(
+      'Accept',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream, application/json'
+    )
+  }
+
+  if (options.token) {
+    headers.set('Authorization', `Bearer ${options.token}`)
+  }
+
+  const fetchInit: RequestInit = {
+    ...options,
+    method: options.method ?? 'GET',
+    headers,
+    body: options.body as BodyInit | null | undefined,
+    credentials: 'include',
+    signal: options.signal,
+  }
+
+  let response: Response
+  try {
+    response = await fetch(url, fetchInit)
+  } catch (error: unknown) {
+    if (error instanceof ApiError) {
+      throw error
+    }
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw ApiError.fromAbortError(error)
+    }
+    throw ApiError.fromNetworkError(error)
+  }
+
+  const contentType = response.headers.get('content-type') ?? ''
+  const isJson =
+    contentType.includes('application/json') || contentType.includes('+json')
+
+  if (!response.ok || isJson) {
+    if (isJson) {
+      try {
+        const errorData = await response.json()
+        if (errorData && typeof errorData === 'object') {
+          const { code, description, title, detail, errors } = errorData as Record<
+            string,
+            unknown
+          >
+          if (typeof code === 'string' || typeof description === 'string') {
+            throw ApiError.fromBusinessError(response.status || 400, {
+              code: typeof code === 'string' ? code : undefined,
+              description: typeof description === 'string' ? description : undefined,
+            })
+          }
+          if (title || detail || errors) {
+            throw ApiError.fromProblemDetails(
+              response.status || 400,
+              errorData as ProblemDetails
+            )
+          }
+        }
+      } catch (parseError) {
+        if (parseError instanceof ApiError) {
+          throw parseError
+        }
+      }
+    }
+
+    if (!response.ok) {
+      throw ApiError.fromHttpFallback(response.status, response.statusText)
+    }
+
+    throw new ApiError({
+      status: response.status,
+      message: 'Phản hồi từ máy chủ không phải là tệp nhị phân hợp lệ.',
+    })
+  }
+
+  if (contentType.includes('text/html')) {
+    throw new ApiError({
+      status: response.status,
+      message: 'Máy chủ trả về trang HTML thay vì tệp mẫu Excel.',
+    })
+  }
+
+  const blob = await response.blob()
+  if (blob.size === 0) {
+    throw new ApiError({
+      status: response.status,
+      message: 'Tệp tải về trống (0 bytes).',
+    })
+  }
+
+  const contentDisposition = response.headers.get('content-disposition')
+  const fileName = parseContentDispositionFileName(
+    contentDisposition,
+    options.fallbackFileName ?? 'riutek-product-import-v1.0.xlsx'
+  )
+
+  return {
+    blob,
+    contentType:
+      contentType ||
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    contentDisposition,
+    fileName,
+  }
+}
+
 export const apiClient = {
   get: <T>(path: string, options?: Omit<RequestOptions, 'method'>) =>
     apiRequest<T>(path, { ...options, method: 'GET' }),

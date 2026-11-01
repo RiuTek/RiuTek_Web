@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Edit3,
   ExternalLink,
+  FileSpreadsheet,
   FolderTree,
   Loader2,
   Package,
@@ -276,6 +277,13 @@ export const AdminProductsPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            to="/admin/product-imports"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 transition hover:bg-emerald-100"
+          >
+            <FileSpreadsheet className="h-4 w-4 text-emerald-700" />
+            Nhập sản phẩm Excel
+          </Link>
           <Link
             to="/admin/categories"
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
