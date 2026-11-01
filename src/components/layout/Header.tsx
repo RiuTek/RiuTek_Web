@@ -13,9 +13,11 @@ import {
   AlertTriangle,
   Package,
   Bookmark,
+  ShieldCheck,
 } from 'lucide-react'
 import { useAuth } from '../../features/auth/AuthContext'
 import { USER_ROLE_LABELS, UserRole } from '../../features/auth/authTypes'
+import { isContentManagerRole } from '../../features/admin/adminGuardHelper'
 import { useCart } from '../../features/cart/CartContext'
 import { BrandLogo } from '../branding/BrandLogo'
 
@@ -159,6 +161,16 @@ export const Header: React.FC = () => {
             </div>
           ) : status === 'authenticated' && user ? (
             <div className="flex items-center gap-1.5 sm:gap-2">
+              {isContentManagerRole(user.role) && (
+                <Link
+                  to="/admin/products"
+                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  title="Trang quản trị sản phẩm & danh mục"
+                >
+                  <ShieldCheck className="w-4 h-4 text-blue-600" />
+                  <span>Quản Trị</span>
+                </Link>
+              )}
               <Link
                 to="/orders"
                 className={`hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 ${
@@ -384,6 +396,25 @@ export const Header: React.FC = () => {
                 </div>
               ) : status === 'authenticated' && user ? (
                 <div className="space-y-2">
+                  {isContentManagerRole(user.role) && (
+                    <Link
+                      to="/admin/products"
+                      onClick={() => setMobileMenuOpen(false)}
+                      className="block px-4 py-2.5 rounded-xl bg-blue-50 border border-blue-200 hover:bg-blue-100 text-blue-900 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <ShieldCheck className="w-4 h-4 text-blue-600" />
+                          <span className="text-xs font-bold text-blue-900">
+                            Trang Quản Trị Catalog
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-semibold text-blue-700">
+                          Mở quản trị &rarr;
+                        </span>
+                      </div>
+                    </Link>
+                  )}
                   <Link
                     to="/orders"
                     onClick={() => setMobileMenuOpen(false)}

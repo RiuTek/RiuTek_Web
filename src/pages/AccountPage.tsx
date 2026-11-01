@@ -19,6 +19,7 @@ import {
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { USER_ROLE_LABELS, UserRole, type AuthUser, type UpdateProfileRequest } from '../features/auth/authTypes'
+import { isContentManagerRole } from '../features/admin/adminGuardHelper'
 import { AddressBook } from '../features/addresses/components/AddressBook'
 
 
@@ -427,6 +428,34 @@ export const AccountPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Quick Admin Catalog Entry Card (Admin / Staff Only) */}
+      {isContentManagerRole(user.role) && (
+        <Link
+          to="/admin/products"
+          className="block bg-blue-50/70 rounded-2xl border border-blue-200 p-5 sm:p-6 hover:border-blue-300 hover:shadow-md transition-all group shadow-xs"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-xs group-hover:scale-105 transition-transform flex-shrink-0">
+                <Shield className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-sm sm:text-base font-bold text-slate-900 group-hover:text-blue-700 transition-colors">
+                  Quản Trị Sản Phẩm &amp; Danh Mục
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-600">
+                  Thêm sửa sản phẩm phần cứng, quản lý cây danh mục, điều chỉnh tồn kho và xem nhật ký biến động.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-xs font-bold text-blue-700 group-hover:translate-x-1 transition-transform flex-shrink-0">
+              <span className="hidden sm:inline">Mở quản trị</span>
+              <ChevronRight className="w-4 h-4" />
+            </div>
+          </div>
+        </Link>
+      )}
 
       {/* Quick Orders Entry Card */}
       <Link

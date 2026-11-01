@@ -1,5 +1,6 @@
-import { createBrowserRouter } from 'react-router-dom'
+import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { PublicLayout } from '../layouts/PublicLayout'
+import { AdminLayout } from '../layouts/AdminLayout'
 import { HomePage } from '../pages/HomePage'
 import { ProductsPage } from '../pages/ProductsPage'
 import { ProductDetailPage } from '../pages/ProductDetailPage'
@@ -20,6 +21,7 @@ import { PCBuildBuyNowPage } from '../pages/PCBuildBuyNowPage'
 import { PCBuilderPage } from '../pages/PCBuilderPage'
 import { NotFoundPage } from '../pages/NotFoundPage'
 import { RequireAuth } from '../features/auth/RequireAuth'
+import { RequireAdminOrStaff } from '../features/admin/RequireAdminOrStaff'
 
 export const router = createBrowserRouter([
   {
@@ -148,6 +150,60 @@ export const router = createBrowserRouter([
       {
         path: '*',
         element: <NotFoundPage />,
+      },
+    ],
+  },
+  {
+    path: '/admin',
+    element: (
+      <RequireAdminOrStaff>
+        <AdminLayout />
+      </RequireAdminOrStaff>
+    ),
+    children: [
+      {
+        index: true,
+        element: <Navigate to="/admin/products" replace />,
+      },
+      {
+        path: 'categories',
+        lazy: async () => {
+          const { AdminCategoriesPage } = await import(
+            '../pages/admin/AdminCategoriesPage'
+          )
+          return { Component: AdminCategoriesPage }
+        },
+      },
+      {
+        path: 'products',
+        lazy: async () => {
+          const { AdminProductsPage } = await import(
+            '../pages/admin/AdminProductsPage'
+          )
+          return { Component: AdminProductsPage }
+        },
+      },
+      {
+        path: 'products/new',
+        lazy: async () => {
+          const { AdminProductCreatePage } = await import(
+            '../pages/admin/AdminProductCreatePage'
+          )
+          return { Component: AdminProductCreatePage }
+        },
+      },
+      {
+        path: 'products/:id/edit',
+        lazy: async () => {
+          const { AdminProductEditPage } = await import(
+            '../pages/admin/AdminProductEditPage'
+          )
+          return { Component: AdminProductEditPage }
+        },
+      },
+      {
+        path: '*',
+        element: <Navigate to="/admin/products" replace />,
       },
     ],
   },
