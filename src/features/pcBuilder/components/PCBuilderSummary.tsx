@@ -2,10 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
-  XCircle,
   AlertTriangle,
-  Info,
-  Zap,
   ShieldAlert,
   RotateCcw,
   Loader2,
@@ -33,6 +30,14 @@ import {
   recordSaveIntent,
   saveDraft,
 } from '../pcBuilderDraftStorage'
+import {
+  determineSaveDecision,
+  createSaveConfirmationSnapshot,
+  isSaveConfirmationValid,
+  createSingleFlightLock,
+  type SaveConfirmationSnapshot,
+} from '../pcBuildSaveHelper'
+import { PCBuildCompatibilityNotice } from './PCBuildCompatibilityNotice'
 import type {
   MyPCBuild,
   PCBuildItemInput,
@@ -75,6 +80,9 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
 
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showSaveModal, setShowSaveModal] = useState(false)
+  const [saveModalStep, setSaveModalStep] = useState<'form' | 'confirm'>('form')
+  const [saveConfirmationSnapshot, setSaveConfirmationSnapshot] =
+    useState<SaveConfirmationSnapshot | null>(null)
   const [buildName, setBuildName] = useState('')
   const [buildDescription, setBuildDescription] = useState('')
   const [saveValidationErrors, setSaveValidationErrors] = useState<{
@@ -90,6 +98,10 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   const [addToCartError, setAddToCartError] = useState<string | null>(null)
   const [addToCartSuccess, setAddToCartSuccess] = useState(false)
   const [guestSaveError, setGuestSaveError] = useState<string | null>(null)
+
+  // Synchronous lock & keyboard focus refs
+  const saveLockRef = useRef(createSingleFlightLock())
+  const confirmBackBtnRef = useRef<HTMLButtonElement | null>(null)
 
   // Định danh phiên xác thực hiện hành
   const currentSessionKey = useMemo(() => {
@@ -110,12 +122,15 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       // Vô hiệu hóa mọi in-flight request của session trước
       saveSequenceRef.current += 1
       addToCartSequenceRef.current += 1
+      saveLockRef.current.release()
 
       // Reset toàn bộ state mutation, saved build, form & modal của account trước
       setSavedBuildInfo(null)
       setIsSaving(false)
       setSaveError(null)
       setShowSaveModal(false)
+      setSaveModalStep('form')
+      setSaveConfirmationSnapshot(null)
       setBuildName('')
       setBuildDescription('')
       setSaveValidationErrors({})
@@ -135,6 +150,37 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       .join(';')
   }, [selectedItems])
 
+  // Snapshot xác nhận hợp lệ theo cấu hình hiện tại
+  const activeConfirmationSnapshot =
+    saveConfirmationSnapshot &&
+    saveConfirmationSnapshot.configKey === currentConfigKey
+      ? saveConfirmationSnapshot
+      : null
+
+  const currentModalStep =
+    saveModalStep === 'confirm' && activeConfirmationSnapshot !== null
+      ? 'confirm'
+      : 'form'
+
+  // Đóng modal bằng phím Escape khi không submit
+  useEffect(() => {
+    if (!showSaveModal) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSaving) {
+        setShowSaveModal(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showSaveModal, isSaving])
+
+  // Focus vào nút "Quay lại chỉnh sửa" khi bước xác nhận xuất hiện
+  useEffect(() => {
+    if (showSaveModal && currentModalStep === 'confirm' && confirmBackBtnRef.current) {
+      confirmBackBtnRef.current.focus()
+    }
+  }, [showSaveModal, currentModalStep])
+
   // Kiểm tra quyền sở hữu và khớp snapshot cấu hình lúc save
   const isCurrentBuildSaved =
     savedBuildInfo !== null &&
@@ -143,14 +189,6 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     user?.id === savedBuildInfo.ownerUserId &&
     savedBuildInfo.configKeyAtSave === currentConfigKey &&
     hasItems
-
-  // Phân nhóm issues theo severity
-  const issues = previewResult?.issues ?? []
-  const errorIssues = issues.filter((i) => i.severity === 'Error')
-  const warningIssues = issues.filter((i) => i.severity === 'Warning')
-  const infoIssues = issues.filter(
-    (i) => i.severity !== 'Error' && i.severity !== 'Warning'
-  )
 
   // Mở form lưu cấu hình
   const handleOpenSaveModal = () => {
@@ -217,17 +255,99 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     }
 
     // 4. Customer: Khởi tạo giá trị mặc định cho form
-    const defaultName = `Cấu hình PC - ${new Date().toLocaleDateString('vi-VN')}`
-    setBuildName(defaultName)
-    setBuildDescription('')
+    if (!buildName.trim()) {
+      const defaultName = `Cấu hình PC - ${new Date().toLocaleDateString('vi-VN')}`
+      setBuildName(defaultName)
+    }
     setSaveValidationErrors({})
     setSaveError(null)
     setAddToCartError(null)
     setAddToCartSuccess(false)
+    setSaveModalStep('form')
     setShowSaveModal(true)
   }
 
-  // Submit lưu cấu hình
+  // Thực thi lệnh lưu cấu hình với synchronous single-flight lock
+  const executeSavePCBuild = async (payload: {
+    name: string
+    description?: string | null
+    items: PCBuildItemInput[]
+  }) => {
+    if (!user || user.role !== UserRole.Customer) {
+      return
+    }
+
+    if (!saveLockRef.current.tryAcquire()) {
+      return
+    }
+
+    setIsSaving(true)
+    setSaveError(null)
+
+    const requestSessionKey = currentSessionKey
+    const requestSeq = ++saveSequenceRef.current
+    const expectedOwnerId = user.id
+
+    const isRequestCurrent = () =>
+      activeSessionKeyRef.current === requestSessionKey &&
+      saveSequenceRef.current === requestSeq
+
+    try {
+      const token = await getAccessToken(false)
+      if (!isRequestCurrent()) return
+      if (!token) {
+        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+      }
+
+      let result: MyPCBuild
+      try {
+        result = await createPCBuild(payload, token)
+      } catch (err: unknown) {
+        if (!isRequestCurrent()) return
+        if (err instanceof ApiError && err.status === 401) {
+          const freshToken = await getAccessToken(true)
+          if (!isRequestCurrent()) return
+          if (!freshToken) throw err
+          result = await createPCBuild(payload, freshToken)
+        } else {
+          throw err
+        }
+      }
+
+      // Guard: Chỉ cập nhật state nếu request vẫn thuộc session và sequence hiện hành
+      if (isRequestCurrent()) {
+        setSavedBuildInfo({
+          build: result,
+          configKeyAtSave: currentConfigKey,
+          ownerUserId: expectedOwnerId,
+        })
+        setShowSaveModal(false)
+        setSaveModalStep('form')
+        setSaveConfirmationSnapshot(null)
+        setAddToCartSuccess(false)
+        setAddToCartError(null)
+      }
+    } catch (err: unknown) {
+      let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
+      if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
+        msg = PC_BUILDER_ERROR_MESSAGES[err.code]
+      } else if (err instanceof ApiError && err.description) {
+        msg = err.description
+      } else if (err instanceof Error) {
+        msg = err.message
+      }
+      if (isRequestCurrent()) {
+        setSaveError(msg)
+      }
+    } finally {
+      saveLockRef.current.release()
+      if (isRequestCurrent()) {
+        setIsSaving(false)
+      }
+    }
+  }
+
+  // Submit lưu cấu hình từ form ban đầu
   const handleSaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (isSaving || !hasItems || !user || user.role !== UserRole.Customer) {
@@ -254,65 +374,90 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     }
 
     setSaveValidationErrors({})
-    setIsSaving(true)
-    setSaveError(null)
 
-    const requestSessionKey = currentSessionKey
-    const requestSeq = ++saveSequenceRef.current
-    const expectedOwnerId = user.id
+    const payloadItems: PCBuildItemInput[] = selectedItems.map((item) => ({
+      productId: item.product.id,
+      quantity: item.quantity,
+    }))
 
-    const isRequestCurrent = () =>
-      activeSessionKeyRef.current === requestSessionKey &&
-      saveSequenceRef.current === requestSeq
-
-    try {
-      const token = await getAccessToken(false)
-      if (!token) {
-        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
-      }
-
-      const payloadItems: PCBuildItemInput[] = selectedItems.map((item) => ({
-        productId: item.product.id,
-        quantity: item.quantity,
-      }))
-
-      const result = await createPCBuild(
-        {
-          name: trimmedName,
-          description: trimmedDesc || null,
-          items: payloadItems,
-        },
-        token
-      )
-
-      // Guard: Chỉ cập nhật state nếu request vẫn thuộc session và sequence hiện hành
-      if (isRequestCurrent()) {
-        setSavedBuildInfo({
-          build: result,
-          configKeyAtSave: currentConfigKey,
-          ownerUserId: expectedOwnerId,
-        })
-        setShowSaveModal(false)
-        setAddToCartSuccess(false)
-        setAddToCartError(null)
-      }
-    } catch (err: unknown) {
-      let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
-      if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
-        msg = PC_BUILDER_ERROR_MESSAGES[err.code]
-      } else if (err instanceof ApiError && err.description) {
-        msg = err.description
-      } else if (err instanceof Error) {
-        msg = err.message
-      }
-      if (isRequestCurrent()) {
-        setSaveError(msg)
-      }
-    } finally {
-      if (isRequestCurrent()) {
-        setIsSaving(false)
-      }
+    const payload = {
+      name: trimmedName,
+      description: trimmedDesc || null,
+      items: payloadItems,
     }
+
+    // Áp dụng bảng quyết định decision table
+    const decision = determineSaveDecision({
+      previewResult,
+      isPreviewLoading: isLoading,
+      previewError: error,
+    })
+
+    if (decision === 'wait_loading') {
+      return
+    }
+
+    if (decision === 'confirm_required' || decision === 'unverified_preview') {
+      const snapshot = createSaveConfirmationSnapshot({
+        flow: 'create',
+        configKey: currentConfigKey,
+        ownerId: user.id,
+        payload,
+        previewResult,
+        previewError: error,
+      })
+      setSaveConfirmationSnapshot(snapshot)
+      setSaveModalStep('confirm')
+      setSaveError(null)
+      return
+    }
+
+    // decision === 'save_directly'
+    await executeSavePCBuild(payload)
+  }
+
+  // Xác nhận lưu cấu hình khi đang ở bước confirm
+  const handleConfirmedSave = async () => {
+    if (
+      isSaving ||
+      !user ||
+      user.role !== UserRole.Customer ||
+      !activeConfirmationSnapshot
+    ) {
+      return
+    }
+
+    const payloadItems: PCBuildItemInput[] = selectedItems.map((item) => ({
+      productId: item.product.id,
+      quantity: item.quantity,
+    }))
+
+    const currentPayload = {
+      name: buildName.trim(),
+      description: buildDescription.trim() || null,
+      items: payloadItems,
+    }
+
+    const isValid = isSaveConfirmationValid({
+      snapshot: activeConfirmationSnapshot,
+      currentConfigKey,
+      currentOwnerId: user.id,
+      currentPayload,
+      previewResult,
+      isPreviewLoading: isLoading,
+      previewError: error,
+    })
+
+    if (!isValid) {
+      setSaveError(
+        'Cấu hình hoặc thông số tương thích đã thay đổi trong lúc chờ xác nhận. Vui lòng kiểm tra lại trước khi lưu.'
+      )
+      setSaveModalStep('form')
+      setSaveConfirmationSnapshot(null)
+      return
+    }
+
+    await executeSavePCBuild(activeConfirmationSnapshot.payload)
   }
 
   // Thêm cấu hình đã lưu vào giỏ hàng
@@ -435,179 +580,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       {/* Preview Details when Available */}
       {previewResult && hasItems && (
         <div className="space-y-5" aria-live="polite">
-          {/* Main Status Badges */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Compatibility Status */}
-            <div
-              className={`p-3 rounded-2xl border flex items-center gap-2.5 ${
-                previewResult.isCompatible
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-rose-50 border-rose-200 text-rose-900'
-              }`}
-            >
-              {previewResult.isCompatible ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-              ) : (
-                <XCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
-              )}
-              <div className="min-w-0">
-                <span className="text-[10px] uppercase font-bold tracking-wider block opacity-75">
-                  Tương thích
-                </span>
-                <span className="text-xs font-bold truncate block">
-                  {previewResult.isCompatible
-                    ? 'Linh kiện tương thích'
-                    : 'Có lỗi tương thích'}
-                </span>
-              </div>
-            </div>
-
-            {/* Complete System Status */}
-            <div
-              className={`p-3 rounded-2xl border flex items-center gap-2.5 ${
-                previewResult.isCompleteSystem
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                  : 'bg-amber-50 border-amber-200 text-amber-900'
-              }`}
-            >
-              {previewResult.isCompleteSystem ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-              ) : (
-                <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-              )}
-              <div className="min-w-0">
-                <span className="text-[10px] uppercase font-bold tracking-wider block opacity-75">
-                  Độ hoàn chỉnh
-                </span>
-                <span className="text-xs font-bold truncate block">
-                  {previewResult.isCompleteSystem
-                    ? 'Đủ linh kiện cơ bản'
-                    : 'Chưa đủ linh kiện'}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Missing Components Alert */}
-          {!previewResult.isCompleteSystem &&
-            previewResult.missingComponents.length > 0 && (
-              <div className="p-3.5 bg-amber-50/80 border border-amber-200/80 rounded-2xl space-y-1.5 text-amber-900 text-xs">
-                <p className="font-bold flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-amber-600" />
-                  <span>Còn thiếu các linh kiện cơ bản:</span>
-                </p>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {previewResult.missingComponents.map((comp, idx) => (
-                    <span
-                      key={`${comp}-${idx}`}
-                      className="px-2 py-0.5 bg-white border border-amber-200 text-amber-900 rounded-lg text-[11px] font-semibold"
-                    >
-                      {comp}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
-          {/* Power Specifications */}
-          <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-2.5">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <Zap className="w-4 h-4 text-amber-500" />
-                <span>Ước tính tiêu thụ:</span>
-              </span>
-              <span className="font-bold text-slate-900">
-                {previewResult.estimatedWattage} W
-              </span>
-            </div>
-
-            <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-200/60">
-              <span className="text-slate-500 flex items-center gap-1.5">
-                <ShieldAlert className="w-4 h-4 text-blue-500" />
-                <span>Khuyến nghị bộ nguồn (PSU):</span>
-              </span>
-              <span className="font-bold text-slate-900">
-                ≥ {previewResult.recommendedPsuWattage} W
-              </span>
-            </div>
-          </div>
-
-          {/* Issues List (Errors, Warnings, Infos) */}
-          {issues.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                Chi tiết lưu ý ({issues.length})
-              </h3>
-
-              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                {/* Error issues */}
-                {errorIssues.map((issue, idx) => (
-                  <div
-                    key={`err-${idx}`}
-                    className="p-3 bg-rose-50 border border-rose-200 text-rose-900 rounded-xl text-xs space-y-1"
-                  >
-                    <div className="flex items-start gap-2">
-                      <XCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <p className="font-semibold leading-relaxed">
-                          {issue.message}
-                        </p>
-                        {(issue.componentA || issue.componentB) && (
-                          <p className="text-[10px] text-rose-700 opacity-80">
-                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Warning issues */}
-                {warningIssues.map((issue, idx) => (
-                  <div
-                    key={`warn-${idx}`}
-                    className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl text-xs space-y-1"
-                  >
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <p className="font-semibold leading-relaxed">
-                          {issue.message}
-                        </p>
-                        {(issue.componentA || issue.componentB) && (
-                          <p className="text-[10px] text-amber-700 opacity-80">
-                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Info issues */}
-                {infoIssues.map((issue, idx) => (
-                  <div
-                    key={`info-${idx}`}
-                    className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs space-y-1"
-                  >
-                    <div className="flex items-start gap-2">
-                      <Info className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-                      <div className="space-y-0.5">
-                        <p className="font-semibold leading-relaxed">
-                          {issue.message}
-                        </p>
-                        {(issue.componentA || issue.componentB) && (
-                          <p className="text-[10px] text-blue-700 opacity-80">
-                            {[issue.componentA, issue.componentB].filter(Boolean).join(' • ')}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <PCBuildCompatibilityNotice
+            isCompatible={previewResult.isCompatible}
+            isCompleteSystem={previewResult.isCompleteSystem}
+            issues={previewResult.issues}
+            missingComponents={previewResult.missingComponents}
+            estimatedWattage={previewResult.estimatedWattage}
+            recommendedPsuWattage={previewResult.recommendedPsuWattage}
+            showPowerSpecs={true}
+            showCompleteSystemBadge={true}
+          />
 
           {/* Purchase Capability Warning */}
           {!previewResult.canPurchaseAll && (
@@ -798,10 +780,34 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         >
           <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
             {/* Modal Header */}
-            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+            <div
+              className={`px-6 py-4 text-white flex items-center justify-between transition-colors ${
+                currentModalStep === 'confirm'
+                  ? activeConfirmationSnapshot?.assessment.level === 'unverified'
+                    ? 'bg-amber-900'
+                    : 'bg-rose-950'
+                  : 'bg-slate-900'
+              }`}
+            >
               <div className="flex items-center gap-2.5">
-                <Bookmark className="w-5 h-5 text-red-500" />
-                <h3 className="font-bold text-sm sm:text-base">Lưu cấu hình PC</h3>
+                {currentModalStep === 'confirm' ? (
+                  <AlertTriangle
+                    className={`w-5 h-5 ${
+                      activeConfirmationSnapshot?.assessment.level === 'unverified'
+                        ? 'text-amber-400'
+                        : 'text-rose-400'
+                    }`}
+                  />
+                ) : (
+                  <Bookmark className="w-5 h-5 text-red-500" />
+                )}
+                <h3 className="font-bold text-sm sm:text-base">
+                  {currentModalStep === 'confirm'
+                    ? activeConfirmationSnapshot?.assessment.level === 'unverified'
+                      ? 'Chưa thể kiểm tra tương thích'
+                      : 'Cấu hình có xung đột tương thích'
+                    : 'Lưu cấu hình PC'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -832,6 +838,91 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                     className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors"
                   >
                     Đóng
+                  </button>
+                </div>
+              </div>
+            ) : currentModalStep === 'confirm' ? (
+              <div className="p-6 space-y-4">
+                {saveError && (
+                  <div
+                    role="alert"
+                    className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-start gap-2"
+                  >
+                    <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                    <span>{saveError}</span>
+                  </div>
+                )}
+
+                {activeConfirmationSnapshot?.assessment.level === 'unverified' ? (
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm space-y-2">
+                    <p className="font-semibold leading-relaxed">
+                      Chưa thể kiểm tra tương thích giữa các linh kiện do hệ thống tạm thời không phản hồi. Bạn có thể thử kiểm tra lại hoặc vẫn tiếp tục lưu cấu hình.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onRetry()
+                        setShowSaveModal(false)
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      <span>Thử kiểm tra lại</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Hệ thống phát hiện một số linh kiện có xung đột hoặc thông số chưa phù hợp. Bạn vẫn có thể tiếp tục lưu cấu hình vào tài khoản và chỉnh sửa sau.
+                    </p>
+                    <div className="max-h-60 overflow-y-auto pr-1">
+                      <PCBuildCompatibilityNotice
+                        isCompatible={activeConfirmationSnapshot?.previewResult?.isCompatible}
+                        isCompleteSystem={activeConfirmationSnapshot?.previewResult?.isCompleteSystem}
+                        issues={activeConfirmationSnapshot?.previewResult?.issues}
+                        missingComponents={activeConfirmationSnapshot?.previewResult?.missingComponents}
+                        compact={true}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="text-[11px] text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                  <p className="font-semibold text-slate-900 truncate">
+                    Cấu hình: {buildName}
+                  </p>
+                  <p>
+                    Số lượng: <span className="font-bold">{itemCount} linh kiện</span> • Tạm tính:{' '}
+                    <span className="font-bold text-slate-900">
+                      {previewResult ? formatVnd(previewResult.totalPrice) : '---'}
+                    </span>
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    ref={confirmBackBtnRef}
+                    type="button"
+                    disabled={isSaving}
+                    onClick={() => setShowSaveModal(false)}
+                    className="px-4 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    Quay lại chỉnh sửa
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSaving}
+                    onClick={handleConfirmedSave}
+                    className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang lưu...</span>
+                      </>
+                    ) : (
+                      <span>Vẫn lưu</span>
+                    )}
                   </button>
                 </div>
               </div>

@@ -1,7 +1,6 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  CheckCircle2,
   AlertTriangle,
   Zap,
   Loader2,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react'
 import { formatVnd } from '../../products/productConstants'
 import type { PCBuildPreviewResult, SelectedPCBuildItem } from '../pcBuilderTypes'
+import { PCBuildCompatibilityNotice } from './PCBuildCompatibilityNotice'
 
 interface PCBuilderEditSummaryProps {
   buildId: string
@@ -146,45 +146,15 @@ export const PCBuilderEditSummary: React.FC<PCBuilderEditSummaryProps> = ({
           </span>
         </div>
 
-        {/* Compatibility Status */}
+        {/* Compatibility Status & Notices */}
         {previewResult && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold">
-              {previewResult.isCompatible ? (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span className="text-emerald-700">Tương thích hoàn toàn</span>
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="w-4 h-4 text-rose-600" />
-                  <span className="text-rose-700">Có cảnh báo tương thích</span>
-                </>
-              )}
-            </div>
-
-            {/* Issues list */}
-            {previewResult.issues && previewResult.issues.length > 0 && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1">
-                <span className="font-bold block">Vấn đề tương thích:</span>
-                <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-rose-800">
-                  {previewResult.issues.map((issue, idx) => (
-                    <li key={idx}>{issue.message}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Missing components */}
-            {previewResult.missingComponents && previewResult.missingComponents.length > 0 && (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
-                <span className="font-bold block">Chưa đủ dàn máy hoàn chỉnh:</span>
-                <p className="text-[11px] text-amber-800">
-                  Thiếu: {previewResult.missingComponents.join(', ')}
-                </p>
-              </div>
-            )}
-          </div>
+          <PCBuildCompatibilityNotice
+            isCompatible={previewResult.isCompatible}
+            isCompleteSystem={previewResult.isCompleteSystem}
+            issues={previewResult.issues}
+            missingComponents={previewResult.missingComponents}
+            compact={true}
+          />
         )}
 
         {/* Preview Loading or Error */}

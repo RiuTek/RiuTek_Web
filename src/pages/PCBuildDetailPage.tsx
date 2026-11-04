@@ -7,8 +7,6 @@ import {
   AlertTriangle,
   AlertCircle,
   Zap,
-  CheckCircle2,
-  XCircle,
   ShoppingBag,
   Trash2,
   Loader2,
@@ -34,6 +32,7 @@ import {
   isOrderedBuild,
 } from '../features/pcBuilder/pcBuilderTypes'
 import { getComponentStockDisplay } from '../features/pcBuilder/pcBuilderStockHelper'
+import { PCBuildCompatibilityNotice } from '../features/pcBuilder/components/PCBuildCompatibilityNotice'
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -525,86 +524,26 @@ const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
         </div>
 
         {/* Specifications & Compatibility badges */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 space-y-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Điện năng tiêu thụ
-            </span>
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-extrabold text-slate-900">
+        <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-3">
+          <div className="flex items-center justify-between text-xs sm:text-sm font-bold text-slate-900 pb-2 border-b border-slate-200/70">
+            <span className="text-slate-500 flex items-center gap-1.5 font-medium">
               <Zap className="w-4 h-4 text-amber-500" />
-              <span>
-                {build.estimatedWattage} W (Nguồn khuyến nghị: {build.recommendedPsuWattage} W)
-              </span>
-            </div>
+              <span>Điện năng tiêu thụ ước tính:</span>
+            </span>
+            <span>
+              {build.estimatedWattage} W
+              {build.recommendedPsuWattage > 0 && ` (Nguồn khuyến nghị: ≥ ${build.recommendedPsuWattage} W)`}
+            </span>
           </div>
 
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 space-y-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Độ tương thích linh kiện
-            </span>
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-extrabold">
-              {build.isCompatible ? (
-                <>
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                  <span className="text-emerald-700">Tương thích hoàn toàn</span>
-                </>
-              ) : (
-                <>
-                  <AlertTriangle className="w-4 h-4 text-rose-600" />
-                  <span className="text-rose-700">Có cảnh báo tương thích</span>
-                </>
-              )}
-            </div>
-          </div>
-
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/70 space-y-0.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-              Trạng thái hệ thống
-            </span>
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-extrabold">
-              {build.isCompleteSystem ? (
-                <span className="text-emerald-700">Đầy đủ bộ phận chính</span>
-              ) : (
-                <span className="text-amber-700">Chưa đủ linh kiện bắt buộc</span>
-              )}
-            </div>
-          </div>
+          <PCBuildCompatibilityNotice
+            isCompatible={build.isCompatible}
+            isCompleteSystem={build.isCompleteSystem}
+            issues={build.issues}
+            missingComponents={build.missingComponents}
+            showCompleteSystemBadge={true}
+          />
         </div>
-
-        {/* Missing Components Alert */}
-        {build.missingComponents && build.missingComponents.length > 0 && (
-          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
-            <div className="flex items-center gap-2 font-bold">
-              <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <span>Chưa đủ linh kiện bắt buộc cho một dàn máy hoàn chỉnh:</span>
-            </div>
-            <p className="pl-6 text-amber-800">
-              Thiếu: {build.missingComponents.join(', ')}
-            </p>
-          </div>
-        )}
-
-        {/* Compatibility Issues Alert */}
-        {build.issues && build.issues.length > 0 && (
-          <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-2">
-            <div className="flex items-center gap-2 font-bold">
-              <XCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
-              <span>Cảnh báo xung đột tương thích do hệ thống phát hiện:</span>
-            </div>
-            <ul className="pl-6 space-y-1 list-disc text-rose-800">
-              {build.issues.map((issue, idx) => (
-                <li key={idx}>
-                  <strong className="font-semibold">{issue.message}</strong>
-                  {issue.ruleId && (
-                    <span className="text-[10px] font-mono text-rose-500 ml-1.5">
-                      ({issue.ruleId})
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
 
         {/* Action Bar: Thêm Giỏ & Xóa */}
         <div className="pt-4 border-t border-slate-100 space-y-3">

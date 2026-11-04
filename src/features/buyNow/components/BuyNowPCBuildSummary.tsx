@@ -25,6 +25,7 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import type { MyPCBuild, MyPCBuildItem } from '../../pcBuilder/pcBuilderTypes'
+import { PCBuildCompatibilityNotice } from '../../pcBuilder/components/PCBuildCompatibilityNotice'
 import { ComponentType } from '../../products/productTypes'
 import { COMPONENT_TYPE_LABELS, formatVnd } from '../../products/productConstants'
 import { getComponentStockDisplay } from '../../pcBuilder/pcBuilderStockHelper'
@@ -162,29 +163,14 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
           </div>
 
           {/* Compatibility / System Status from BE */}
-          <div className="space-y-1.5 pt-1 text-xs">
-            {!build.isCompatible && (
-              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
-                <div className="space-y-0.5">
-                  <span className="font-bold text-[11px]">Lưu ý tương thích:</span>
-                  <p className="text-[11px] text-amber-800">
-                    {build.issues.length > 0
-                      ? build.issues.join('; ')
-                      : 'Hệ thống ghi nhận cấu hình có thể chưa tương thích hoàn toàn.'}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {!build.isCompleteSystem && build.missingComponents.length > 0 && (
-              <div className="p-2.5 rounded-xl bg-slate-100/90 text-slate-700 text-[11px] leading-relaxed">
-                <span className="font-semibold text-slate-900">Thiếu linh kiện thiết yếu: </span>
-                {build.missingComponents
-                  .map((c) => COMPONENT_TYPE_LABELS[c as unknown as ComponentType] || c)
-                  .join(', ')}
-              </div>
-            )}
+          <div className="pt-1">
+            <PCBuildCompatibilityNotice
+              isCompatible={build.isCompatible}
+              isCompleteSystem={build.isCompleteSystem}
+              issues={build.issues}
+              missingComponents={build.missingComponents}
+              compact={true}
+            />
           </div>
         </div>
       ) : (

@@ -8,11 +8,13 @@ import {
   Loader2,
   RotateCcw,
   ShieldAlert,
+  X,
 } from 'lucide-react'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../features/auth/AuthContext'
 import { UserRole } from '../features/auth/authTypes'
 import { ComponentType, type ProductSummary } from '../features/products/productTypes'
+import { formatVnd } from '../features/products/productConstants'
 import {
   getMyPCBuildById,
   updateMyPCBuild,
@@ -29,6 +31,14 @@ import {
   computeIsDirty,
   type InitialBuildState,
 } from '../features/pcBuilder/pcBuilderEditHelper'
+import {
+  determineSaveDecision,
+  createSaveConfirmationSnapshot,
+  isSaveConfirmationValid,
+  createSingleFlightLock,
+  type SaveConfirmationSnapshot,
+} from '../features/pcBuilder/pcBuildSaveHelper'
+import { PCBuildCompatibilityNotice } from '../features/pcBuilder/components/PCBuildCompatibilityNotice'
 import { PCBuilderSlotList } from '../features/pcBuilder/components/PCBuilderSlotList'
 import { PCBuilderProductPickerModal } from '../features/pcBuilder/components/PCBuilderProductPickerModal'
 import { PCBuilderEditSummary } from '../features/pcBuilder/components/PCBuilderEditSummary'
@@ -120,12 +130,17 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     (completedKey !== currentConfigKey ||
       (!effectivePreviewResult && !effectivePreviewError))
 
-  // State submit PUT
+  // State submit PUT & confirmation
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [isConflict, setIsConflict] = useState(false)
+  const [showConfirmModal, setShowConfirmModal] = useState(false)
+  const [confirmSnapshot, setConfirmSnapshot] =
+    useState<SaveConfirmationSnapshot | null>(null)
 
-  // Lifecycle và sequence tracking refs
+  // Lifecycle, lock và sequence tracking refs
+  const putLockRef = useRef(createSingleFlightLock())
+  const confirmBackBtnRef = useRef<HTMLButtonElement | null>(null)
   const isMountedRef = useRef(true)
   const userRef = useRef(user)
   const buildIdRef = useRef(buildId)
@@ -138,9 +153,11 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
 
   useEffect(() => {
     isMountedRef.current = true
+    const putLock = putLockRef.current
     return () => {
       isMountedRef.current = false
       isSaveSuccessBypassRef.current = false
+      putLock.release()
       if (previewAbortRef.current) {
         previewAbortRef.current.abort()
       }
@@ -151,7 +168,38 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     userRef.current = user
     buildIdRef.current = buildId
     isSaveSuccessBypassRef.current = false
+    putLockRef.current.release()
   }, [user, buildId])
+
+  // Snapshot xác nhận hợp lệ theo cấu hình và ngữ cảnh hiện tại
+  const activeConfirmSnapshot =
+    confirmSnapshot &&
+    confirmSnapshot.ownerId === ownerId &&
+    confirmSnapshot.buildId === buildId &&
+    confirmSnapshot.configKey === currentConfigKey
+      ? confirmSnapshot
+      : null
+
+  const isModalOpen = showConfirmModal && activeConfirmSnapshot !== null
+
+  // Đóng modal xác nhận bằng phím Escape
+  useEffect(() => {
+    if (!isModalOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        setShowConfirmModal(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isModalOpen, isSubmitting])
+
+  // Focus vào nút "Quay lại chỉnh sửa" khi modal xác nhận mở
+  useEffect(() => {
+    if (isModalOpen && confirmBackBtnRef.current) {
+      confirmBackBtnRef.current.focus()
+    }
+  }, [isModalOpen])
 
   // Tính toán trạng thái dirty
   const isDirty = useMemo(() => {
@@ -444,12 +492,9 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     setReloadTrigger((prev) => prev + 1)
   }
 
-  // 3. Xử lý Cập nhật cấu hình (PUT /api/v1/pc-builds/{id})
-  const handleUpdateBuild = async () => {
-    if (isSubmitting || !isDirty || !initialBuild) return
-    const cleanName = name.trim()
-    if (!cleanName) return
-    if (selectedItems.length === 0 || selectedItems.length > 30) return
+  // 3. Thực thi cập nhật cấu hình thật với synchronous lock
+  const executePutBuild = async (requestPayload: UpdatePCBuildRequest) => {
+    if (!putLockRef.current.tryAcquire()) return
 
     const putSeq = ++putSeqRef.current
     const isContextCurrent = () =>
@@ -463,15 +508,6 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     setIsConflict(false)
     setActiveSlot(null) // Đóng ngay modal picker đang mở khi bắt đầu submit
     isSaveSuccessBypassRef.current = false
-
-    const requestPayload: UpdatePCBuildRequest = {
-      name: cleanName,
-      description: description.trim() || null,
-      items: selectedItems.map((item) => ({
-        productId: item.product.id,
-        quantity: item.quantity,
-      })),
-    }
 
     try {
       const token = await getAccessToken(false)
@@ -494,6 +530,9 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
       }
 
       if (!isContextCurrent()) return
+
+      setShowConfirmModal(false)
+      setConfirmSnapshot(null)
 
       // Cập nhật thành công: bypass blocker đồng bộ và điều hướng về trang chi tiết
       isSaveSuccessBypassRef.current = true
@@ -531,10 +570,92 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
         setSubmitError('Lỗi kết nối máy chủ.')
       }
     } finally {
+      putLockRef.current.release()
       if (isContextCurrent()) {
         setIsSubmitting(false)
       }
     }
+  }
+
+  // Xử lý Cập nhật cấu hình khi nhấn nút (PUT /api/v1/pc-builds/{id})
+  const handleUpdateBuild = async () => {
+    if (isSubmitting || !isDirty || !initialBuild) return
+    const cleanName = name.trim()
+    if (!cleanName) return
+    if (selectedItems.length === 0 || selectedItems.length > 30) return
+
+    const requestPayload: UpdatePCBuildRequest = {
+      name: cleanName,
+      description: description.trim() || null,
+      items: selectedItems.map((item) => ({
+        productId: item.product.id,
+        quantity: item.quantity,
+      })),
+    }
+
+    const decision = determineSaveDecision({
+      previewResult: effectivePreviewResult,
+      isPreviewLoading,
+      previewError: effectivePreviewError,
+    })
+
+    if (decision === 'wait_loading') {
+      return
+    }
+
+    if (decision === 'confirm_required' || decision === 'unverified_preview') {
+      const snapshot = createSaveConfirmationSnapshot({
+        flow: 'edit',
+        configKey: currentConfigKey,
+        ownerId,
+        buildId,
+        payload: requestPayload,
+        previewResult: effectivePreviewResult,
+        previewError: effectivePreviewError,
+      })
+      setConfirmSnapshot(snapshot)
+      setShowConfirmModal(true)
+      setSubmitError(null)
+      return
+    }
+
+    await executePutBuild(requestPayload)
+  }
+
+  // Xử lý xác nhận "Vẫn lưu" từ modal cảnh báo
+  const handleConfirmedUpdate = async () => {
+    if (isSubmitting || !activeConfirmSnapshot) return
+
+    const currentPayload = {
+      name: name.trim(),
+      description: description.trim() || null,
+      items: selectedItems.map((i) => ({
+        productId: i.product.id,
+        quantity: i.quantity,
+      })),
+    }
+
+    const isValid = isSaveConfirmationValid({
+      snapshot: activeConfirmSnapshot,
+      currentConfigKey,
+      currentOwnerId: ownerId,
+      currentBuildId: buildId,
+      currentPayload,
+      previewResult: effectivePreviewResult,
+      isPreviewLoading,
+      previewError: effectivePreviewError,
+    })
+
+    if (!isValid) {
+      setSubmitError(
+        'Cấu hình hoặc thông số tương thích đã thay đổi trong lúc chờ xác nhận. Vui lòng kiểm tra lại trước khi lưu.'
+      )
+      setShowConfirmModal(false)
+      setConfirmSnapshot(null)
+      return
+    }
+
+    await executePutBuild(activeConfirmSnapshot.payload)
   }
 
   // Xử lý Hủy chỉnh sửa
@@ -724,6 +845,136 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
           onClose={() => setActiveSlot(null)}
           selectedItems={selectedItems}
         />
+      )}
+
+      {/* Compatibility Warning Confirmation Modal */}
+      {isModalOpen && activeConfirmSnapshot && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+        >
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+            {/* Header */}
+            <div
+              className={`px-6 py-4 text-white flex items-center justify-between ${
+                activeConfirmSnapshot.assessment.level === 'unverified'
+                  ? 'bg-amber-900'
+                  : 'bg-rose-950'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle
+                  className={`w-5 h-5 ${
+                    activeConfirmSnapshot.assessment.level === 'unverified'
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                />
+                <h3 className="font-bold text-sm sm:text-base">
+                  {activeConfirmSnapshot.assessment.level === 'unverified'
+                    ? 'Chưa thể kiểm tra tương thích'
+                    : 'Cấu hình có xung đột tương thích'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setShowConfirmModal(false)}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                aria-label="Đóng xác nhận"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-4">
+              {submitError && (
+                <div
+                  role="alert"
+                  className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs font-semibold flex items-start gap-2"
+                >
+                  <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                  <span>{submitError}</span>
+                </div>
+              )}
+
+              {activeConfirmSnapshot.assessment.level === 'unverified' ? (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm space-y-2">
+                  <p className="font-semibold leading-relaxed">
+                    Chưa thể kiểm tra tương thích giữa các linh kiện do hệ thống tạm thời không phản hồi. Bạn có thể thử kiểm tra lại hoặc vẫn tiếp tục lưu cấu hình.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPreviewRetryTrigger((prev) => prev + 1)
+                      setShowConfirmModal(false)
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Thử kiểm tra lại</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-600 leading-relaxed">
+                    Hệ thống phát hiện một số linh kiện có xung đột hoặc thông số chưa phù hợp. Bạn vẫn có thể tiếp tục cập nhật cấu hình và chỉnh sửa sau.
+                  </p>
+                  <div className="max-h-60 overflow-y-auto pr-1">
+                    <PCBuildCompatibilityNotice
+                      isCompatible={activeConfirmSnapshot.previewResult?.isCompatible}
+                      isCompleteSystem={activeConfirmSnapshot.previewResult?.isCompleteSystem}
+                      issues={activeConfirmSnapshot.previewResult?.issues}
+                      missingComponents={activeConfirmSnapshot.previewResult?.missingComponents}
+                      compact={true}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="text-[11px] text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 space-y-0.5">
+                <p className="font-semibold text-slate-900 truncate">
+                  Cập nhật: {name}
+                </p>
+                <p>
+                  Số lượng: <span className="font-bold">{selectedItems.length} linh kiện</span> • Tạm tính:{' '}
+                  <span className="font-bold text-slate-900">
+                    {effectivePreviewResult ? formatVnd(effectivePreviewResult.totalPrice) : '---'}
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  ref={confirmBackBtnRef}
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setShowConfirmModal(false)}
+                  className="px-4 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Quay lại chỉnh sửa
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={handleConfirmedUpdate}
+                  className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 shadow-2xs"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Đang cập nhật...</span>
+                    </>
+                  ) : (
+                    <span>Vẫn lưu</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Blocker Confirmation Modal */}
