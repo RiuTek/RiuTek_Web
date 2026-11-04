@@ -5,6 +5,15 @@ import {
   type ApiBlobResponse,
   type PagedResult,
 } from '../../lib/api'
+import type {
+  GetManagedOrdersParams,
+  ManagedOrderSummaryDto,
+  OrderDetailDto,
+  OrderStatus,
+  PaymentMethod,
+  PaymentStatus,
+  UpdateManagedOrderStatusRequest,
+} from '../orders/orderTypes'
 import type { Category, ProductDetail } from '../products/productTypes'
 import type {
   AdjustStockRequest,
@@ -27,6 +36,29 @@ import type {
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+const ALLOWED_ORDER_STATUSES = new Set<OrderStatus>([
+  'PendingPayment',
+  'Confirmed',
+  'Processing',
+  'Shipping',
+  'Completed',
+  'Cancelled',
+  'Refunded',
+])
+
+const ALLOWED_PAYMENT_METHODS = new Set<PaymentMethod>([
+  'Stripe',
+  'VNPay',
+  'COD',
+])
+
+const ALLOWED_PAYMENT_STATUSES = new Set<PaymentStatus>([
+  'Pending',
+  'Completed',
+  'Failed',
+  'Refunded',
+])
 
 export function isValidUuid(id: string | null | undefined): boolean {
   if (!id || typeof id !== 'string') return false
@@ -330,6 +362,129 @@ export async function confirmProductMediaUpload(
   return apiClient.post<ProductMediaDto>(
     '/product-media/confirmations',
     request,
+    {
+      token,
+      signal,
+    }
+  )
+}
+
+/**
+ * GET /api/v1/orders/admin (ContentManager only — Admin/Staff)
+ * Query: pageIndex (default 1), pageSize (default 20, 1..100),
+ * optional status, paymentMethod, paymentStatus, search (<= 150 chars).
+ */
+export async function getManagedOrders(
+  params: GetManagedOrdersParams,
+  token: string,
+  signal?: AbortSignal
+): Promise<PagedResult<ManagedOrderSummaryDto>> {
+  const rawPageIndex = params.pageIndex
+  const pageIndex =
+    typeof rawPageIndex === 'number' &&
+    Number.isSafeInteger(rawPageIndex) &&
+    rawPageIndex >= 1
+      ? rawPageIndex
+      : 1
+
+  const rawPageSize = params.pageSize
+  const pageSize =
+    typeof rawPageSize === 'number' &&
+    Number.isSafeInteger(rawPageSize) &&
+    rawPageSize >= 1 &&
+    rawPageSize <= 100
+      ? rawPageSize
+      : 20
+
+  const queryParams: Record<string, string | number> = {
+    pageIndex,
+    pageSize,
+  }
+
+  if (params.status && ALLOWED_ORDER_STATUSES.has(params.status)) {
+    queryParams.status = params.status
+  }
+  if (
+    params.paymentMethod &&
+    ALLOWED_PAYMENT_METHODS.has(params.paymentMethod)
+  ) {
+    queryParams.paymentMethod = params.paymentMethod
+  }
+  if (
+    params.paymentStatus &&
+    ALLOWED_PAYMENT_STATUSES.has(params.paymentStatus)
+  ) {
+    queryParams.paymentStatus = params.paymentStatus
+  }
+
+  const trimmedSearch = (params.search ?? '').trim().slice(0, 150)
+  if (trimmedSearch.length > 0) {
+    queryParams.search = trimmedSearch
+  }
+
+  return apiClient.get<PagedResult<ManagedOrderSummaryDto>>('/orders/admin', {
+    params: queryParams,
+    token,
+    signal,
+  })
+}
+
+/**
+ * GET /api/v1/orders/admin/{id} (ContentManager only — Admin/Staff)
+ */
+export async function getManagedOrderById(
+  orderId: string,
+  token: string,
+  signal?: AbortSignal
+): Promise<OrderDetailDto> {
+  const cleanId = orderId?.trim() ?? ''
+  if (!isValidUuid(cleanId)) {
+    throw new ApiError({
+      message: 'Mã định danh đơn hàng (ID) không hợp lệ.',
+      status: 400,
+      code: 'Order.InvalidId',
+      description: 'Mã định danh đơn hàng (ID) không đúng định dạng UUID.',
+    })
+  }
+
+  return apiClient.get<OrderDetailDto>(
+    `/orders/admin/${encodeURIComponent(cleanId)}`,
+    {
+      token,
+      signal,
+    }
+  )
+}
+
+/**
+ * PATCH /api/v1/orders/admin/{id}/status (ContentManager only — Admin/Staff)
+ * Body: { expectedStatus, newStatus } (string enum names).
+ * Response 200: OrderDetailDto.
+ */
+export async function updateManagedOrderStatus(
+  orderId: string,
+  request: UpdateManagedOrderStatusRequest,
+  token: string,
+  signal?: AbortSignal
+): Promise<OrderDetailDto> {
+  const cleanId = orderId?.trim() ?? ''
+  if (!isValidUuid(cleanId)) {
+    throw new ApiError({
+      message: 'Mã định danh đơn hàng (ID) không hợp lệ.',
+      status: 400,
+      code: 'Order.InvalidId',
+      description: 'Mã định danh đơn hàng (ID) không đúng định dạng UUID.',
+    })
+  }
+
+  const payload: UpdateManagedOrderStatusRequest = {
+    expectedStatus: request.expectedStatus,
+    newStatus: request.newStatus,
+  }
+
+  return apiClient.patch<OrderDetailDto>(
+    `/orders/admin/${encodeURIComponent(cleanId)}/status`,
+    payload,
     {
       token,
       signal,

@@ -26,6 +26,29 @@ export const ADMIN_ERROR_MESSAGES: Record<string, string> = {
   'Auth.Unauthorized': 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
   'Auth.Forbidden': 'Bạn không có quyền thực hiện thao tác quản trị này.',
   'User.AccountInactive': 'Tài khoản của bạn hiện đang bị khóa hoặc ngừng hoạt động.',
+  'Checkout.Unauthorized':
+    'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+  'Checkout.UserNotFound':
+    'Không tìm thấy tài khoản quản trị/nhân viên hiện tại trên hệ thống. Vui lòng đăng nhập lại.',
+  'Checkout.AccountInactive':
+    'Tài khoản quản trị/nhân viên của bạn hiện đang ngừng hoạt động.',
+  'OrderManagement.Forbidden':
+    'Tài khoản của bạn không có quyền quản trị đơn hàng (yêu cầu quyền Nhân viên hoặc Quản trị viên đang hoạt động).',
+  'Order.NotFound': 'Không tìm thấy đơn hàng yêu cầu.',
+  'Order.InvalidId': 'Mã định danh đơn hàng (ID) không đúng định dạng UUID.',
+  'Order.InvalidStatus': 'Trạng thái đơn hàng gửi lên không hợp lệ.',
+  'Order.StatusConflict':
+    'Trạng thái đơn hàng đã thay đổi so với dữ liệu đang xem. Đã tải lại thông tin mới nhất, vui lòng kiểm tra trước khi chọn lại thao tác.',
+  'Order.ConcurrencyConflict':
+    'Đơn hàng hoặc tồn kho vừa được cập nhật đồng thời bởi một yêu cầu khác. Vui lòng kiểm tra lại trạng thái mới nhất của đơn hàng.',
+  'Order.InvalidStatusTransition':
+    'Không thể chuyển trạng thái đơn hàng theo bước vừa chọn từ trạng thái hiện tại.',
+  'Order.PaidOrderRequiresRefund':
+    'Đơn đã thanh toán trực tuyến cần quy trình hoàn tiền; màn hình này chưa hỗ trợ hủy trực tiếp đơn đã thanh toán.',
+  'Order.StockOverflow':
+    'Không thể hoàn kho khi hủy đơn vì số lượng tồn kho sau hoàn trả vượt quá giới hạn cho phép.',
+  'Order.ProductMissing':
+    'Một sản phẩm trong đơn hàng không còn tồn tại trên hệ thống nên không thể hoàn kho an toàn.',
   'Category.Forbidden': 'Bạn không có quyền quản lý danh mục.',
   'Category.NotFound': 'Không tìm thấy danh mục.',
   'Category.ParentNotFound': 'Danh mục cha không tồn tại.',

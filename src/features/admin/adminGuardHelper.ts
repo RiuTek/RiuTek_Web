@@ -1,5 +1,5 @@
 import { ApiError } from '../../lib/api'
-import { UserRole, type AuthStatus } from '../auth/authTypes'
+import { USER_ROLE_LABELS, UserRole, type AuthStatus } from '../auth/authTypes'
 
 export type AdminAccessStatus =
   | 'checking'
@@ -16,6 +16,49 @@ export interface AdminAccessResolution {
 
 export function isContentManagerRole(role: UserRole | string | undefined | null): boolean {
   return role === UserRole.Admin || role === UserRole.Staff
+}
+
+/**
+ * Nhãn vai trò hiển thị trên badge/tài khoản trong khu vực Quản trị (Desktop & Mobile).
+ * Tuyệt đối không gắn nhãn cứng "Admin" cho tài khoản Nhân viên (Staff).
+ */
+export function getAdminRoleBadgeLabel(
+  role: UserRole | string | undefined | null
+): string {
+  if (role === UserRole.Admin || role === 'Admin') {
+    return USER_ROLE_LABELS[UserRole.Admin]
+  }
+  if (role === UserRole.Staff || role === 'Staff') {
+    return USER_ROLE_LABELS[UserRole.Staff]
+  }
+  return 'Quản trị'
+}
+
+/**
+ * Kiểm tra trạng thái active cho mục điều hướng trong AdminLayout:
+ * - '/admin/orders' active ở cả '/admin/orders' và '/admin/orders/:orderId'
+ * - '/admin/products' active ở '/admin/products' và '/admin/products/:id/edit' (nhưng không active ở '/admin/products/new')
+ */
+export function isAdminNavItemActive(itemTo: string, pathname: string): boolean {
+  const cleanPath = (pathname || '').replace(/\/+$/, '') || '/'
+  const cleanTarget = (itemTo || '').replace(/\/+$/, '') || '/'
+
+  if (cleanPath === cleanTarget) {
+    return true
+  }
+
+  if (cleanTarget === '/admin/orders') {
+    return cleanPath.startsWith('/admin/orders/')
+  }
+
+  if (cleanTarget === '/admin/products') {
+    return (
+      cleanPath.startsWith('/admin/products/') &&
+      cleanPath !== '/admin/products/new'
+    )
+  }
+
+  return false
 }
 
 export function resolveAdminAccessState(params: {

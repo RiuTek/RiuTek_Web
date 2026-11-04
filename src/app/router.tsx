@@ -166,6 +166,24 @@ export const router = createBrowserRouter([
         element: <Navigate to="/admin/products" replace />,
       },
       {
+        path: 'orders',
+        lazy: async () => {
+          const { AdminOrdersPage } = await import(
+            '../pages/admin/AdminOrdersPage'
+          )
+          return { Component: AdminOrdersPage }
+        },
+      },
+      {
+        path: 'orders/:orderId',
+        lazy: async () => {
+          const { AdminOrderDetailPage } = await import(
+            '../pages/admin/AdminOrderDetailPage'
+          )
+          return { Component: AdminOrderDetailPage }
+        },
+      },
+      {
         path: 'categories',
         lazy: async () => {
           const { AdminCategoriesPage } = await import(

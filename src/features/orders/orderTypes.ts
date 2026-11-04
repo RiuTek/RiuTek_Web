@@ -35,6 +35,22 @@ export interface OrderSummaryDto {
   createdAt: string
 }
 
+export interface ManagedOrderSummaryDto {
+  id: string
+  orderNumber: string
+  status: OrderStatus
+  paymentMethod: PaymentMethod
+  paymentStatus: PaymentStatus
+  customerName: string
+  customerEmail: string
+  customerPhone: string
+  currency: string
+  finalAmount: number
+  itemCount: number
+  createdAt: string
+  updatedAt: string | null
+}
+
 export interface OrderItemDto {
   productId: string
   productName: string
@@ -74,4 +90,18 @@ export interface GetMyOrdersParams {
   pageIndex?: number
   pageSize?: number
   status?: OrderStatus
+}
+
+export interface GetManagedOrdersParams {
+  pageIndex?: number
+  pageSize?: number
+  status?: OrderStatus
+  paymentMethod?: PaymentMethod
+  paymentStatus?: PaymentStatus
+  search?: string
+}
+
+export interface UpdateManagedOrderStatusRequest {
+  expectedStatus: OrderStatus
+  newStatus: OrderStatus
 }

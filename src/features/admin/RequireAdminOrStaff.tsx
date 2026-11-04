@@ -86,7 +86,7 @@ export const RequireAdminOrStaff: React.FC<RequireAdminOrStaffProps> = ({ childr
               Không Có Quyền Truy Cập Quản Trị
             </h1>
             <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-              Khu vực Quản trị Catalog &amp; Kho hàng chỉ dành cho tài khoản <strong>Nhân viên (Staff)</strong> hoặc <strong>Quản trị viên (Admin)</strong>.
+              Khu vực Quản trị hệ thống (đơn hàng, sản phẩm, danh mục và tồn kho) chỉ dành cho tài khoản <strong>Nhân viên (Staff)</strong> hoặc <strong>Quản trị viên (Admin)</strong>.
             </p>
           </div>
           <div className="pt-2 flex flex-wrap items-center justify-center gap-3">

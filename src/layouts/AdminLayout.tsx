@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
+  ClipboardList,
   FileSpreadsheet,
   FolderTree,
   LogOut,
@@ -14,7 +15,10 @@ import {
   X,
 } from 'lucide-react'
 import { useAuth } from '../features/auth/AuthContext'
-import { USER_ROLE_LABELS } from '../features/auth/authTypes'
+import {
+  getAdminRoleBadgeLabel,
+  isAdminNavItemActive,
+} from '../features/admin/adminGuardHelper'
 import { BrandLogo } from '../components/branding/BrandLogo'
 
 interface NavItem {
@@ -26,6 +30,13 @@ interface NavItem {
 }
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
+  {
+    to: '/admin/orders',
+    label: 'Quản lý đơn hàng',
+    description: 'Đơn hàng COD, Stripe & giao nhận',
+    icon: ClipboardList,
+    end: false,
+  },
   {
     to: '/admin/products',
     label: 'Quản lý sản phẩm',
@@ -63,7 +74,7 @@ export const AdminLayout: React.FC = () => {
   const [isLoggingOut, setIsLoggingOut] = useState(false)
   const [logoutError, setLogoutError] = useState<string | null>(null)
 
-  const roleLabel = user ? USER_ROLE_LABELS[user.role] ?? user.role : 'Quản trị'
+  const roleLabel = getAdminRoleBadgeLabel(user?.role)
 
   const handleLogout = async () => {
     if (isLoggingOut) return
@@ -83,32 +94,32 @@ export const AdminLayout: React.FC = () => {
     <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row text-slate-900">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:flex-col lg:w-72 lg:fixed lg:inset-y-0 bg-slate-950 text-white border-r border-slate-800 z-30">
-        {/* Brand & Admin Badge */}
+        {/* Brand & Role Badge */}
         <div className="p-5 border-b border-slate-800/80 flex items-center justify-between gap-3">
           <Link
             to="/admin/products"
             className="flex items-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500 rounded-xl"
-            aria-label="RiuTek Admin Catalog"
+            aria-label="RiuTek Quản trị"
           >
             <BrandLogo markClassName="h-8 w-auto" textClassName="text-xl" theme="dark" />
           </Link>
           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-red-600/20 text-red-400 border border-red-500/30 text-[10px] font-bold uppercase tracking-wider">
             <ShieldCheck className="w-3 h-3" />
-            Admin
+            {roleLabel}
           </span>
         </div>
 
         {/* Navigation Links */}
         <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto" aria-label="Menu quản trị">
           <div className="px-3 pb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-            Catalog &amp; Tồn kho
+            Quản trị
           </div>
           {ADMIN_NAV_ITEMS.map((item) => {
             const Icon = item.icon
-            const isEditRouteActive =
-              item.to === '/admin/products' &&
-              location.pathname.startsWith('/admin/products/') &&
-              location.pathname !== '/admin/products/new'
+            const isCustomActive = isAdminNavItemActive(
+              item.to,
+              location.pathname
+            )
 
             return (
               <NavLink
@@ -116,7 +127,7 @@ export const AdminLayout: React.FC = () => {
                 to={item.to}
                 end={item.end}
                 className={({ isActive }) => {
-                  const active = isActive || isEditRouteActive
+                  const active = isActive || isCustomActive
                   return `flex items-start gap-3 px-3.5 py-3 rounded-2xl transition-all group ${
                     active
                       ? 'bg-red-600 text-white shadow-sm'
@@ -185,7 +196,7 @@ export const AdminLayout: React.FC = () => {
             <BrandLogo markClassName="h-7 w-auto" textClassName="text-lg" theme="dark" />
           </Link>
           <span className="px-2 py-0.5 rounded-full bg-red-600/20 text-red-400 border border-red-500/30 text-[10px] font-bold uppercase">
-            Admin
+            {roleLabel}
           </span>
         </div>
 
@@ -215,19 +226,24 @@ export const AdminLayout: React.FC = () => {
           <nav className="space-y-1" aria-label="Menu quản trị di động">
             {ADMIN_NAV_ITEMS.map((item) => {
               const Icon = item.icon
+              const isCustomActive = isAdminNavItemActive(
+                item.to,
+                location.pathname
+              )
               return (
                 <NavLink
                   key={item.to}
                   to={item.to}
                   end={item.end}
                   onClick={() => setMobileNavOpen(false)}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
-                      isActive
+                  className={({ isActive }) => {
+                    const active = isActive || isCustomActive
+                    return `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-colors ${
+                      active
                         ? 'bg-red-600 text-white'
                         : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`
-                  }
+                  }}
                 >
                   <Icon className="w-4 h-4" />
                   <span>{item.label}</span>
