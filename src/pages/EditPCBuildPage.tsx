@@ -36,6 +36,8 @@ import {
   createSaveConfirmationSnapshot,
   isSaveConfirmationValid,
   createSingleFlightLock,
+  executePCBuildSaveOperation,
+  PCBuildSaveLifecycle,
   type SaveConfirmationSnapshot,
 } from '../features/pcBuilder/pcBuildSaveHelper'
 import { PCBuildCompatibilityNotice } from '../features/pcBuilder/components/PCBuildCompatibilityNotice'
@@ -64,6 +66,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
 }) => {
   const navigate = useNavigate()
   const { user, getAccessToken } = useAuth()
+  const isCustomer = user?.role === UserRole.Customer
 
   // State nạp dữ liệu gốc từ GET (derived loading pattern)
   const [initialBuild, setInitialBuild] = useState<MyPCBuild | null>(null)
@@ -141,21 +144,28 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   // Lifecycle, lock và sequence tracking refs
   const putLockRef = useRef(createSingleFlightLock())
   const confirmBackBtnRef = useRef<HTMLButtonElement | null>(null)
+  const editConfirmDialogRef = useRef<HTMLDialogElement | null>(null)
+  const editTriggerBtnRef = useRef<HTMLButtonElement | null>(null)
   const isMountedRef = useRef(true)
   const userRef = useRef(user)
   const buildIdRef = useRef(buildId)
   const recordSeqRef = useRef(0)
-  const putSeqRef = useRef(0)
   const previewSeqRef = useRef(0)
   const previewAbortRef = useRef<AbortController | null>(null)
   const isSaveSuccessBypassRef = useRef(false)
   const isSavedCleanRef = useRef(false)
+  const lifecycleRef = useRef<PCBuildSaveLifecycle>(
+    new PCBuildSaveLifecycle(ownerId, buildId)
+  )
 
   useEffect(() => {
     isMountedRef.current = true
+    const lifecycle = lifecycleRef.current
+    lifecycle.mount()
     const putLock = putLockRef.current
     return () => {
       isMountedRef.current = false
+      lifecycle.unmount()
       isSaveSuccessBypassRef.current = false
       putLock.release()
       if (previewAbortRef.current) {
@@ -168,8 +178,9 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     userRef.current = user
     buildIdRef.current = buildId
     isSaveSuccessBypassRef.current = false
+    lifecycleRef.current.updateContext(ownerId, buildId)
     putLockRef.current.release()
-  }, [user, buildId])
+  }, [user, ownerId, buildId])
 
   // Snapshot xác nhận hợp lệ theo cấu hình và ngữ cảnh hiện tại
   const activeConfirmSnapshot =
@@ -179,27 +190,6 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     confirmSnapshot.configKey === currentConfigKey
       ? confirmSnapshot
       : null
-
-  const isModalOpen = showConfirmModal && activeConfirmSnapshot !== null
-
-  // Đóng modal xác nhận bằng phím Escape
-  useEffect(() => {
-    if (!isModalOpen) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSubmitting) {
-        setShowConfirmModal(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isModalOpen, isSubmitting])
-
-  // Focus vào nút "Quay lại chỉnh sửa" khi modal xác nhận mở
-  useEffect(() => {
-    if (isModalOpen && confirmBackBtnRef.current) {
-      confirmBackBtnRef.current.focus()
-    }
-  }, [isModalOpen])
 
   // Tính toán trạng thái dirty
   const isDirty = useMemo(() => {
@@ -227,6 +217,42 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
       )
     }
   )
+
+  const isModalOpen =
+    showConfirmModal &&
+    activeConfirmSnapshot !== null &&
+    blocker.state !== 'blocked'
+
+  // Native <dialog> lifecycle & body scroll lock
+  useEffect(() => {
+    if (!isModalOpen) return
+    const dialog = editConfirmDialogRef.current
+    if (dialog && !dialog.open) {
+      dialog.showModal()
+    }
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+      if (dialog && dialog.open) {
+        dialog.close()
+      }
+      if (
+        editTriggerBtnRef.current &&
+        typeof editTriggerBtnRef.current.focus === 'function'
+      ) {
+        editTriggerBtnRef.current.focus()
+      }
+    }
+  }, [isModalOpen])
+
+  // Focus vào nút "Quay lại chỉnh sửa" khi modal xác nhận mở
+  useEffect(() => {
+    if (isModalOpen && confirmBackBtnRef.current) {
+      confirmBackBtnRef.current.focus()
+    }
+  }, [isModalOpen])
 
   // Cảnh báo người dùng khi reload hoặc đóng tab
   useEffect(() => {
@@ -492,94 +518,73 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
     setReloadTrigger((prev) => prev + 1)
   }
 
-  // 3. Thực thi cập nhật cấu hình thật với synchronous lock
+  // 3. Thực thi cập nhật cấu hình thật với shared executePCBuildSaveOperation
   const executePutBuild = async (requestPayload: UpdatePCBuildRequest) => {
-    if (!putLockRef.current.tryAcquire()) return
+    if (!buildId || !isCustomer) return
 
-    const putSeq = ++putSeqRef.current
-    const isContextCurrent = () =>
-      isMountedRef.current &&
-      userRef.current?.id === ownerId &&
-      buildIdRef.current === buildId &&
-      putSeqRef.current === putSeq
-
-    setIsSubmitting(true)
-    setSubmitError(null)
-    setIsConflict(false)
     setActiveSlot(null) // Đóng ngay modal picker đang mở khi bắt đầu submit
-    isSaveSuccessBypassRef.current = false
+    const opContext = lifecycleRef.current.createOperationContext()
 
-    try {
-      const token = await getAccessToken(false)
-      if (!isContextCurrent()) return
-      if (!token) throw new Error('Phiên làm việc đã hết hạn. Vui lòng đăng nhập lại.')
+    await executePCBuildSaveOperation<UpdatePCBuildRequest, MyPCBuild>({
+      payload: requestPayload,
+      getAccessToken,
+      mutationFn: (p, token) => updateMyPCBuild(buildId, p, token),
+      context: opContext,
+      lock: putLockRef.current,
+      onStart: () => {
+        setIsSubmitting(true)
+        setSubmitError(null)
+        setIsConflict(false)
+        isSaveSuccessBypassRef.current = false
+      },
+      onSuccess: (updatedRecord) => {
+        setShowConfirmModal(false)
+        setConfirmSnapshot(null)
 
-      let updatedRecord: MyPCBuild
-      try {
-        updatedRecord = await updateMyPCBuild(buildId, requestPayload, token)
-      } catch (err: unknown) {
-        if (!isContextCurrent()) return
-        if (err instanceof ApiError && err.status === 401) {
-          const freshToken = await getAccessToken(true)
-          if (!isContextCurrent()) return
-          if (!freshToken) throw err
-          updatedRecord = await updateMyPCBuild(buildId, requestPayload, freshToken)
-        } else {
-          throw err
+        // Cập nhật thành công: bypass blocker đồng bộ và điều hướng về trang chi tiết
+        isSaveSuccessBypassRef.current = true
+        isSavedCleanRef.current = true
+        setIsSavedClean(true)
+
+        if (blocker.state === 'blocked') {
+          blocker.reset()
         }
-      }
 
-      if (!isContextCurrent()) return
-
-      setShowConfirmModal(false)
-      setConfirmSnapshot(null)
-
-      // Cập nhật thành công: bypass blocker đồng bộ và điều hướng về trang chi tiết
-      isSaveSuccessBypassRef.current = true
-      isSavedCleanRef.current = true
-      setIsSavedClean(true)
-
-      // Nếu trước đó đang có navigation bị chặn (modal pending blocker), reset để không bị treo
-      if (blocker.state === 'blocked') {
-        blocker.reset()
-      }
-
-      navigate(`/pc-builds/${updatedRecord.id}`, { replace: true })
-    } catch (err: unknown) {
-      if (!isContextCurrent()) return
-      isSaveSuccessBypassRef.current = false
-
-      if (err instanceof ApiError) {
-        if (err.status === 409) {
-          setIsConflict(true)
-          setSubmitError(
-            'Cấu hình đã bị thay đổi bởi thao tác khác. Bạn có muốn tải lại dữ liệu mới nhất từ máy chủ không? (Lưu ý: các thay đổi chưa lưu sẽ bị hủy).'
-          )
-        } else if (err.status === 404) {
-          setSubmitError('Không tìm thấy cấu hình này trên máy chủ.')
-        } else if (err.status === 403) {
-          setSubmitError('Bạn không có quyền cập nhật cấu hình PC này.')
-        } else if (err.description) {
-          setSubmitError(err.description)
+        navigate(`/pc-builds/${updatedRecord.id}`, { replace: true })
+      },
+      onError: (err: unknown) => {
+        isSaveSuccessBypassRef.current = false
+        if (err instanceof ApiError) {
+          if (err.status === 409) {
+            setIsConflict(true)
+            setSubmitError(
+              'Cấu hình đã bị thay đổi bởi thao tác khác. Bạn có muốn tải lại dữ liệu mới nhất từ máy chủ không? (Lưu ý: các thay đổi chưa lưu sẽ bị hủy).'
+            )
+          } else if (err.status === 404) {
+            setSubmitError('Không tìm thấy cấu hình này trên máy chủ.')
+          } else if (err.status === 403) {
+            setSubmitError('Bạn không có quyền cập nhật cấu hình PC này.')
+          } else if (err.description) {
+            setSubmitError(err.description)
+          } else {
+            setSubmitError('Không thể cập nhật cấu hình PC. Vui lòng thử lại.')
+          }
+        } else if (err instanceof Error) {
+          setSubmitError(err.message)
         } else {
-          setSubmitError('Không thể cập nhật cấu hình PC. Vui lòng thử lại.')
+          setSubmitError('Lỗi kết nối máy chủ.')
         }
-      } else if (err instanceof Error) {
-        setSubmitError(err.message)
-      } else {
-        setSubmitError('Lỗi kết nối máy chủ.')
-      }
-    } finally {
-      putLockRef.current.release()
-      if (isContextCurrent()) {
+      },
+      onSettled: () => {
         setIsSubmitting(false)
-      }
-    }
+      },
+    })
   }
 
   // Xử lý Cập nhật cấu hình khi nhấn nút (PUT /api/v1/pc-builds/{id})
   const handleUpdateBuild = async () => {
     if (isSubmitting || !isDirty || !initialBuild) return
+    editTriggerBtnRef.current = document.activeElement as HTMLButtonElement | null
     const cleanName = name.trim()
     if (!cleanName) return
     if (selectedItems.length === 0 || selectedItems.length > 30) return
@@ -847,17 +852,30 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
         />
       )}
 
-      {/* Compatibility Warning Confirmation Modal */}
+      {/* Compatibility Warning Confirmation Modal with native <dialog> */}
       {isModalOpen && activeConfirmSnapshot && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+        <dialog
+          ref={editConfirmDialogRef}
+          aria-labelledby="pc-build-edit-confirm-dialog-title"
+          onCancel={(e) => {
+            e.preventDefault()
+            if (!isSubmitting) {
+              setShowConfirmModal(false)
+              setConfirmSnapshot(null)
+            }
+          }}
+          onClick={(e) => {
+            if (e.target === editConfirmDialogRef.current && !isSubmitting) {
+              setShowConfirmModal(false)
+              setConfirmSnapshot(null)
+            }
+          }}
+          className="backdrop:bg-slate-950/60 backdrop:backdrop-blur-xs p-0 bg-transparent rounded-3xl shadow-2xl max-w-md w-[95vw] max-h-[90vh] overflow-hidden m-auto border border-slate-200/80 focus:outline-none"
         >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
             {/* Header */}
             <div
-              className={`px-6 py-4 text-white flex items-center justify-between ${
+              className={`px-6 py-4 text-white flex items-center justify-between flex-shrink-0 ${
                 activeConfirmSnapshot.assessment.level === 'unverified'
                   ? 'bg-amber-900'
                   : 'bg-rose-950'
@@ -871,7 +889,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
                       : 'text-rose-400'
                   }`}
                 />
-                <h3 className="font-bold text-sm sm:text-base">
+                <h3 id="pc-build-edit-confirm-dialog-title" className="font-bold text-sm sm:text-base">
                   {activeConfirmSnapshot.assessment.level === 'unverified'
                     ? 'Chưa thể kiểm tra tương thích'
                     : 'Cấu hình có xung đột tương thích'}
@@ -880,8 +898,11 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
               <button
                 type="button"
                 disabled={isSubmitting}
-                onClick={() => setShowConfirmModal(false)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                onClick={() => {
+                  setShowConfirmModal(false)
+                  setConfirmSnapshot(null)
+                }}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50"
                 aria-label="Đóng xác nhận"
               >
                 <X className="w-4 h-4" />
@@ -951,7 +972,10 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
                   ref={confirmBackBtnRef}
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => setShowConfirmModal(false)}
+                  onClick={() => {
+                    setShowConfirmModal(false)
+                    setConfirmSnapshot(null)
+                  }}
                   className="px-4 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-colors"
                 >
                   Quay lại chỉnh sửa
@@ -974,7 +998,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
 
       {/* Blocker Confirmation Modal */}

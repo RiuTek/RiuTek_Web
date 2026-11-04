@@ -35,6 +35,8 @@ import {
   createSaveConfirmationSnapshot,
   isSaveConfirmationValid,
   createSingleFlightLock,
+  executePCBuildSaveOperation,
+  PCBuildSaveLifecycle,
   type SaveConfirmationSnapshot,
 } from '../pcBuildSaveHelper'
 import { PCBuildCompatibilityNotice } from './PCBuildCompatibilityNotice'
@@ -102,6 +104,8 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   // Synchronous lock & keyboard focus refs
   const saveLockRef = useRef(createSingleFlightLock())
   const confirmBackBtnRef = useRef<HTMLButtonElement | null>(null)
+  const saveDialogRef = useRef<HTMLDialogElement | null>(null)
+  const saveTriggerBtnRef = useRef<HTMLButtonElement | null>(null)
 
   // Định danh phiên xác thực hiện hành
   const currentSessionKey = useMemo(() => {
@@ -111,16 +115,26 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   }, [authStatus, user?.id])
 
   const activeSessionKeyRef = useRef(currentSessionKey)
-  const saveSequenceRef = useRef(0)
   const addToCartSequenceRef = useRef(0)
+  const lifecycleRef = useRef<PCBuildSaveLifecycle>(
+    new PCBuildSaveLifecycle(currentSessionKey, null)
+  )
+
+  useEffect(() => {
+    const lifecycle = lifecycleRef.current
+    lifecycle.mount()
+    return () => {
+      lifecycle.unmount()
+    }
+  }, [])
 
   // Reset toàn bộ state mutation & build của account trước khi đăng xuất hoặc đổi tài khoản
   useEffect(() => {
     if (activeSessionKeyRef.current !== currentSessionKey) {
       activeSessionKeyRef.current = currentSessionKey
+      lifecycleRef.current.updateContext(currentSessionKey, null)
 
       // Vô hiệu hóa mọi in-flight request của session trước
-      saveSequenceRef.current += 1
       addToCartSequenceRef.current += 1
       saveLockRef.current.release()
 
@@ -162,17 +176,29 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       ? 'confirm'
       : 'form'
 
-  // Đóng modal bằng phím Escape khi không submit
+  // Native <dialog> lifecycle & body scroll lock
   useEffect(() => {
     if (!showSaveModal) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSaving) {
-        setShowSaveModal(false)
+    const dialog = saveDialogRef.current
+    if (dialog && !dialog.open) {
+      dialog.showModal()
+    }
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = originalOverflow
+      if (dialog && dialog.open) {
+        dialog.close()
+      }
+      if (
+        saveTriggerBtnRef.current &&
+        typeof saveTriggerBtnRef.current.focus === 'function'
+      ) {
+        saveTriggerBtnRef.current.focus()
       }
     }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [showSaveModal, isSaving])
+  }, [showSaveModal])
 
   // Focus vào nút "Quay lại chỉnh sửa" khi bước xác nhận xuất hiện
   useEffect(() => {
@@ -191,8 +217,11 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     hasItems
 
   // Mở form lưu cấu hình
-  const handleOpenSaveModal = () => {
+  const handleOpenSaveModal = (e?: React.MouseEvent<HTMLButtonElement>) => {
     if (!hasItems) return
+    if (e) {
+      saveTriggerBtnRef.current = e.currentTarget
+    }
     setGuestSaveError(null)
 
     // 1. Nếu là khách vãng lai (hoặc chưa đăng nhập): lưu guest draft và ghi nhận save intent
@@ -267,7 +296,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     setShowSaveModal(true)
   }
 
-  // Thực thi lệnh lưu cấu hình với synchronous single-flight lock
+  // Thực thi lệnh lưu cấu hình với shared executePCBuildSaveOperation
   const executeSavePCBuild = async (payload: {
     name: string
     description?: string | null
@@ -277,48 +306,27 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
       return
     }
 
-    if (!saveLockRef.current.tryAcquire()) {
-      return
-    }
-
-    setIsSaving(true)
-    setSaveError(null)
-
-    const requestSessionKey = currentSessionKey
-    const requestSeq = ++saveSequenceRef.current
     const expectedOwnerId = user.id
+    const configSnapshot = currentConfigKey
+    const opContext = lifecycleRef.current.createOperationContext()
 
-    const isRequestCurrent = () =>
-      activeSessionKeyRef.current === requestSessionKey &&
-      saveSequenceRef.current === requestSeq
-
-    try {
-      const token = await getAccessToken(false)
-      if (!isRequestCurrent()) return
-      if (!token) {
-        throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
-      }
-
-      let result: MyPCBuild
-      try {
-        result = await createPCBuild(payload, token)
-      } catch (err: unknown) {
-        if (!isRequestCurrent()) return
-        if (err instanceof ApiError && err.status === 401) {
-          const freshToken = await getAccessToken(true)
-          if (!isRequestCurrent()) return
-          if (!freshToken) throw err
-          result = await createPCBuild(payload, freshToken)
-        } else {
-          throw err
-        }
-      }
-
-      // Guard: Chỉ cập nhật state nếu request vẫn thuộc session và sequence hiện hành
-      if (isRequestCurrent()) {
+    await executePCBuildSaveOperation<
+      { name: string; description?: string | null; items: PCBuildItemInput[] },
+      MyPCBuild
+    >({
+      payload,
+      getAccessToken,
+      mutationFn: (p, token) => createPCBuild(p, token),
+      context: opContext,
+      lock: saveLockRef.current,
+      onStart: () => {
+        setIsSaving(true)
+        setSaveError(null)
+      },
+      onSuccess: (result) => {
         setSavedBuildInfo({
           build: result,
-          configKeyAtSave: currentConfigKey,
+          configKeyAtSave: configSnapshot,
           ownerUserId: expectedOwnerId,
         })
         setShowSaveModal(false)
@@ -326,25 +334,22 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         setSaveConfirmationSnapshot(null)
         setAddToCartSuccess(false)
         setAddToCartError(null)
-      }
-    } catch (err: unknown) {
-      let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
-      if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
-        msg = PC_BUILDER_ERROR_MESSAGES[err.code]
-      } else if (err instanceof ApiError && err.description) {
-        msg = err.description
-      } else if (err instanceof Error) {
-        msg = err.message
-      }
-      if (isRequestCurrent()) {
+      },
+      onError: (err: unknown) => {
+        let msg = 'Không thể lưu cấu hình lúc này. Vui lòng thử lại.'
+        if (err instanceof ApiError && err.code && PC_BUILDER_ERROR_MESSAGES[err.code]) {
+          msg = PC_BUILDER_ERROR_MESSAGES[err.code]
+        } else if (err instanceof ApiError && err.description) {
+          msg = err.description
+        } else if (err instanceof Error) {
+          msg = err.message
+        }
         setSaveError(msg)
-      }
-    } finally {
-      saveLockRef.current.release()
-      if (isRequestCurrent()) {
+      },
+      onSettled: () => {
         setIsSaving(false)
-      }
-    }
+      },
+    })
   }
 
   // Submit lưu cấu hình từ form ban đầu
@@ -771,17 +776,38 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         )}
       </div>
 
-      {/* Save Build Modal */}
+      {/* Save Build Modal with native <dialog> */}
       {showSaveModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+        <dialog
+          ref={saveDialogRef}
+          aria-labelledby="pc-build-save-dialog-title"
+          onCancel={(e) => {
+            e.preventDefault()
+            if (!isSaving) {
+              if (currentModalStep === 'confirm') {
+                setSaveModalStep('form')
+                setSaveConfirmationSnapshot(null)
+              } else {
+                setShowSaveModal(false)
+              }
+            }
+          }}
+          onClick={(e) => {
+            if (e.target === saveDialogRef.current && !isSaving) {
+              if (currentModalStep === 'confirm') {
+                setSaveModalStep('form')
+                setSaveConfirmationSnapshot(null)
+              } else {
+                setShowSaveModal(false)
+              }
+            }
+          }}
+          className="backdrop:bg-slate-950/60 backdrop:backdrop-blur-xs p-0 bg-transparent rounded-3xl shadow-2xl max-w-md w-[95vw] max-h-[90vh] overflow-hidden m-auto border border-slate-200/80 focus:outline-none"
         >
-          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 flex flex-col max-h-[90vh]">
             {/* Modal Header */}
             <div
-              className={`px-6 py-4 text-white flex items-center justify-between transition-colors ${
+              className={`px-6 py-4 text-white flex items-center justify-between transition-colors flex-shrink-0 ${
                 currentModalStep === 'confirm'
                   ? activeConfirmationSnapshot?.assessment.level === 'unverified'
                     ? 'bg-amber-900'
@@ -801,7 +827,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                 ) : (
                   <Bookmark className="w-5 h-5 text-red-500" />
                 )}
-                <h3 className="font-bold text-sm sm:text-base">
+                <h3 id="pc-build-save-dialog-title" className="font-bold text-sm sm:text-base">
                   {currentModalStep === 'confirm'
                     ? activeConfirmationSnapshot?.assessment.level === 'unverified'
                       ? 'Chưa thể kiểm tra tương thích'
@@ -811,8 +837,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => setShowSaveModal(false)}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                disabled={isSaving}
+                onClick={() => {
+                  if (currentModalStep === 'confirm') {
+                    setSaveModalStep('form')
+                    setSaveConfirmationSnapshot(null)
+                  } else {
+                    setShowSaveModal(false)
+                  }
+                }}
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors disabled:opacity-50"
                 aria-label="Đóng form lưu"
               >
                 <X className="w-4 h-4" />
@@ -904,7 +938,10 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
                     ref={confirmBackBtnRef}
                     type="button"
                     disabled={isSaving}
-                    onClick={() => setShowSaveModal(false)}
+                    onClick={() => {
+                      setSaveModalStep('form')
+                      setSaveConfirmationSnapshot(null)
+                    }}
                     className="px-4 py-2 border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-colors"
                   >
                     Quay lại chỉnh sửa
@@ -1022,7 +1059,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
               </form>
             )}
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   )

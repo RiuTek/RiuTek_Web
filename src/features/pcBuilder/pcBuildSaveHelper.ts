@@ -1,8 +1,10 @@
+import { ApiError } from '../../lib/api'
 import {
   evaluateCompatibility,
   type CompatibilityAssessment,
 } from './pcBuildCompatibilityHelper'
 import type {
+  CompatibilityIssue,
   PCBuildItemInput,
   PCBuildPreviewResult,
 } from './pcBuilderTypes'
@@ -50,6 +52,50 @@ export function determineSaveDecision(params: SaveDecisionParams): SaveActionDec
   return 'save_directly'
 }
 
+/**
+ * Tạo chữ ký chuẩn hóa (canonical assessment signature) cho toàn bộ nội dung đánh giá hiển thị:
+ * - isCompatible, isCompleteSystem, missingComponents (đã sort)
+ * - estimatedWattage, recommendedPsuWattage, totalPrice
+ * - issues đầy đủ: ruleId, severity, message, componentTypes (đã sort)
+ * - Độc lập thứ tự response nhưng nhạy với mọi thay đổi nội dung
+ */
+export function computeAssessmentSignature(params: {
+  previewResult: PCBuildPreviewResult | null
+  previewError: string | null
+}): string {
+  if (params.previewError || !params.previewResult) {
+    return `unverified:${params.previewError ?? 'null'}`
+  }
+
+  const p = params.previewResult
+  const sortedIssues = (p.issues ?? [])
+    .map((issue) => {
+      const compA = issue.componentA ?? ''
+      const compB = issue.componentB ?? ''
+      const compTypes = Array.isArray((issue as unknown as { componentTypes?: string[] }).componentTypes)
+        ? [...((issue as unknown as { componentTypes: string[] }).componentTypes)].sort().join(',')
+        : ''
+      const rule = issue.ruleId ?? ''
+      const sev = (issue.severity ?? '').trim().toLowerCase()
+      const msg = issue.message ?? ''
+      return `${rule}|${sev}|${msg}|${compA}|${compB}|${compTypes}`
+    })
+    .sort()
+    .join(';;')
+
+  const sortedMissing = (p.missingComponents ?? []).slice().sort().join(',')
+
+  return [
+    `comp:${Boolean(p.isCompatible)}`,
+    `sys:${Boolean(p.isCompleteSystem)}`,
+    `missing:${sortedMissing}`,
+    `estWatt:${p.estimatedWattage ?? 0}`,
+    `recPsu:${p.recommendedPsuWattage ?? 0}`,
+    `totalPrice:${p.totalPrice ?? 0}`,
+    `issues:${sortedIssues}`,
+  ].join('##')
+}
+
 export interface SaveConfirmationSnapshot {
   flow: 'create' | 'edit'
   configKey: string
@@ -61,6 +107,7 @@ export interface SaveConfirmationSnapshot {
     items: PCBuildItemInput[]
   }
   assessment: CompatibilityAssessment
+  assessmentSignature: string
   isCompleteSystem: boolean
   missingComponents: string[]
   estimatedWattage: number
@@ -71,8 +118,51 @@ export interface SaveConfirmationSnapshot {
 }
 
 /**
+ * Deep-clone danh sách issues để tạo bản sao bất biến không bị mutate từ bên ngoài
+ */
+function cloneIssues(issues?: CompatibilityIssue[] | null): CompatibilityIssue[] {
+  if (!Array.isArray(issues)) return []
+  return issues.map((i) => {
+    const raw = i as unknown as { componentTypes?: string[] }
+    const cloned: CompatibilityIssue = {
+      ruleId: i.ruleId,
+      message: i.message,
+      severity: i.severity,
+      componentA: i.componentA ?? '',
+      componentB: i.componentB ?? '',
+    }
+    if (Array.isArray(raw.componentTypes)) {
+      (cloned as unknown as { componentTypes: string[] }).componentTypes = [...raw.componentTypes]
+    }
+    return cloned
+  })
+}
+
+/**
+ * Deep-clone previewResult để lưu snapshot bất biến
+ */
+function clonePreviewResult(
+  preview: PCBuildPreviewResult | null
+): PCBuildPreviewResult | null {
+  if (!preview) return null
+  return {
+    isCompatible: preview.isCompatible,
+    isCompleteSystem: preview.isCompleteSystem,
+    canPurchaseAll: preview.canPurchaseAll ?? true,
+    totalPrice: preview.totalPrice,
+    estimatedWattage: preview.estimatedWattage,
+    recommendedPsuWattage: preview.recommendedPsuWattage,
+    missingComponents: Array.isArray(preview.missingComponents)
+      ? [...preview.missingComponents]
+      : [],
+    items: Array.isArray(preview.items) ? [...preview.items] : [],
+    issues: cloneIssues(preview.issues),
+  }
+}
+
+/**
  * Tạo snapshot xác nhận lưu cấu hình gắn liền với context hiển thị hiện hành.
- * Không lưu vào sessionStorage/localStorage/server.
+ * Lưu bản sao bất biến của nội dung đánh giá thực sự hiển thị (không giữ reference có thể bị mutate).
  */
 export function createSaveConfirmationSnapshot(params: {
   flow: 'create' | 'edit'
@@ -87,10 +177,16 @@ export function createSaveConfirmationSnapshot(params: {
   previewResult: PCBuildPreviewResult | null
   previewError: string | null
 }): SaveConfirmationSnapshot {
+  const clonedPreview = clonePreviewResult(params.previewResult)
   const assessment = evaluateCompatibility({
-    isCompatible: params.previewResult?.isCompatible,
-    issues: params.previewResult?.issues,
-    hasPreviewError: Boolean(params.previewError || !params.previewResult),
+    isCompatible: clonedPreview?.isCompatible,
+    issues: clonedPreview?.issues,
+    hasPreviewError: Boolean(params.previewError || !clonedPreview),
+  })
+
+  const assessmentSignature = computeAssessmentSignature({
+    previewResult: clonedPreview,
+    previewError: params.previewError,
   })
 
   return {
@@ -107,11 +203,12 @@ export function createSaveConfirmationSnapshot(params: {
       })),
     },
     assessment,
-    isCompleteSystem: params.previewResult?.isCompleteSystem ?? false,
-    missingComponents: params.previewResult?.missingComponents ?? [],
-    estimatedWattage: params.previewResult?.estimatedWattage ?? 0,
-    recommendedPsuWattage: params.previewResult?.recommendedPsuWattage ?? 0,
-    previewResult: params.previewResult,
+    assessmentSignature,
+    isCompleteSystem: clonedPreview?.isCompleteSystem ?? false,
+    missingComponents: clonedPreview?.missingComponents ?? [],
+    estimatedWattage: clonedPreview?.estimatedWattage ?? 0,
+    recommendedPsuWattage: clonedPreview?.recommendedPsuWattage ?? 0,
+    previewResult: clonedPreview,
     previewError: params.previewError,
     createdAt: Date.now(),
   }
@@ -122,7 +219,9 @@ export function createSaveConfirmationSnapshot(params: {
  * - Cùng ownerId, buildId (nếu là edit), cùng configKey (linh kiện & số lượng)
  * - Cùng tên và mô tả đã nhập
  * - Không đang trong trạng thái loading preview mới
- * - Kết quả đánh giá tương thích không bị thay đổi bởi response preview mới
+ * - Chữ ký đánh giá tương thích (assessmentSignature) khớp hoàn toàn với preview hiện tại:
+ *   nếu thay đổi bất kỳ ruleId, message, severity, component, missingComponents,
+ *   wattage, giá tạm tính hoặc error state -> lập tức trả về false.
  */
 export function isSaveConfirmationValid(params: {
   snapshot: SaveConfirmationSnapshot | null
@@ -162,8 +261,15 @@ export function isSaveConfirmationValid(params: {
   }
 
   const cleanBuildId = currentBuildId?.trim() || null
-  if (snapshot.buildId !== cleanBuildId) {
-    return false
+  if (snapshot.flow === 'edit') {
+    if (!cleanBuildId || snapshot.buildId !== cleanBuildId) {
+      return false
+    }
+  } else {
+    // flow === 'create'
+    if (cleanBuildId !== null || snapshot.buildId !== null) {
+      return false
+    }
   }
 
   if (snapshot.configKey !== currentConfigKey) {
@@ -179,39 +285,27 @@ export function isSaveConfirmationValid(params: {
     return false
   }
 
-  // So sánh danh sách items
-  if (snapshot.payload.items.length !== currentPayload.items.length) {
+  // So sánh danh sách items độc lập thứ tự phần tử
+  const snapshotItemsKey = snapshot.payload.items
+    .map((i) => `${i.productId}:${i.quantity}`)
+    .sort()
+    .join(';')
+  const currentItemsKey = currentPayload.items
+    .map((i) => `${i.productId}:${i.quantity}`)
+    .sort()
+    .join(';')
+
+  if (snapshotItemsKey !== currentItemsKey) {
     return false
   }
 
-  for (let i = 0; i < snapshot.payload.items.length; i++) {
-    const a = snapshot.payload.items[i]
-    const b = currentPayload.items[i]
-    if (a.productId !== b.productId || a.quantity !== b.quantity) {
-      return false
-    }
-  }
-
-  // Kiểm tra đánh giá tương thích hiện tại không bị thay đổi ngầm
-  const currentAssessment = evaluateCompatibility({
-    isCompatible: previewResult?.isCompatible,
-    issues: previewResult?.issues,
-    hasPreviewError: Boolean(previewError || !previewResult),
+  // So sánh chữ ký đánh giá toàn diện
+  const currentSignature = computeAssessmentSignature({
+    previewResult,
+    previewError,
   })
 
-  if (snapshot.assessment.level !== currentAssessment.level) {
-    return false
-  }
-  if (
-    snapshot.assessment.classifiedIssues.totalCount !==
-    currentAssessment.classifiedIssues.totalCount
-  ) {
-    return false
-  }
-  if (
-    snapshot.assessment.classifiedIssues.errors.length !==
-    currentAssessment.classifiedIssues.errors.length
-  ) {
+  if (snapshot.assessmentSignature !== currentSignature) {
     return false
   }
 
@@ -219,7 +313,7 @@ export function isSaveConfirmationValid(params: {
 }
 
 /**
- * Khóa đồng bộ đơn lượt (synchronous in-flight lock) chống double-click và Enter kép trước khi React kịp rerender
+ * Khóa đồng bộ đơn lượt (synchronous in-flight lock) chống double-click và Enter kép
  */
 export function createSingleFlightLock() {
   let inFlight = false
@@ -230,9 +324,159 @@ export function createSingleFlightLock() {
       inFlight = true
       return true
     },
-    release: (): void => {
+    release: () => {
       inFlight = false
     },
     isInFlight: (): boolean => inFlight,
+  }
+}
+
+export type SaveOperationLock = ReturnType<typeof createSingleFlightLock>
+
+export interface SaveOperationContext {
+  isAlive: () => boolean
+}
+
+/**
+ * Quản lý vòng đời và thế hệ (generation) của context lưu PC Build:
+ * Đảm bảo unmount, đổi account, đổi build hoặc StrictMode unmount-remount
+ * không gây rò rỉ request hoặc thực thi callback trên generation cũ.
+ */
+export class PCBuildSaveLifecycle {
+  private generation = 0
+  private isMounted = true
+  private activeSession: string | null = null
+  private activeBuildId: string | null = null
+
+  constructor(session: string | null = null, buildId: string | null = null) {
+    this.activeSession = session
+    this.activeBuildId = buildId
+  }
+
+  mount() {
+    this.isMounted = true
+  }
+
+  unmount() {
+    this.isMounted = false
+    this.generation++
+  }
+
+  updateContext(session: string | null, buildId: string | null = null) {
+    if (this.activeSession !== session || this.activeBuildId !== buildId) {
+      this.activeSession = session
+      this.activeBuildId = buildId
+      this.generation++
+    }
+  }
+
+  createOperationContext(): SaveOperationContext {
+    const gen = this.generation
+    const expectedSession = this.activeSession
+    const expectedBuildId = this.activeBuildId
+    return {
+      isAlive: () =>
+        this.isMounted &&
+        this.generation === gen &&
+        this.activeSession === expectedSession &&
+        this.activeBuildId === expectedBuildId,
+    }
+  }
+}
+
+export interface ExecutePCBuildSaveParams<TPayload, TResult> {
+  payload: TPayload
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | null>
+  mutationFn: (payload: TPayload, token: string) => Promise<TResult>
+  context: SaveOperationContext
+  lock: SaveOperationLock
+  onStart?: () => void
+  onSuccess?: (result: TResult) => void
+  onError?: (err: unknown) => void
+  onSettled?: () => void
+}
+
+/**
+ * Helper production thực thi quy trình lưu bất đồng bộ dùng chung cho cả Create và Edit:
+ * 1. Khóa synchronous single-flight lock
+ * 2. Kiểm tra context.isAlive() trước và sau mỗi điểm await (token, 401 refresh, mutation)
+ * 3. Nếu unmount trước khi gửi mutation -> mutation calls = 0
+ * 4. Xử lý retry 401 với fresh token đúng tối đa 1 lần
+ * 5. Bỏ qua response và không gọi callbacks nếu context đã unmount hoặc đổi session/build
+ * 6. Giải phóng lock trong finally
+ */
+export async function executePCBuildSaveOperation<TPayload, TResult>(
+  params: ExecutePCBuildSaveParams<TPayload, TResult>
+): Promise<boolean> {
+  const {
+    payload,
+    getAccessToken,
+    mutationFn,
+    context,
+    lock,
+    onStart,
+    onSuccess,
+    onError,
+    onSettled,
+  } = params
+
+  if (!lock.tryAcquire()) {
+    return false
+  }
+
+  if (!context.isAlive()) {
+    lock.release()
+    return false
+  }
+
+  onStart?.()
+
+  try {
+    const token = await getAccessToken(false)
+    if (!context.isAlive()) {
+      return false
+    }
+
+    if (!token) {
+      throw new Error('Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.')
+    }
+
+    let result: TResult
+    try {
+      result = await mutationFn(payload, token)
+    } catch (err: unknown) {
+      if (!context.isAlive()) {
+        return false
+      }
+      if (err instanceof ApiError && err.status === 401) {
+        const freshToken = await getAccessToken(true)
+        if (!context.isAlive()) {
+          return false
+        }
+        if (!freshToken) {
+          throw err
+        }
+        result = await mutationFn(payload, freshToken)
+      } else {
+        throw err
+      }
+    }
+
+    if (!context.isAlive()) {
+      return false
+    }
+
+    onSuccess?.(result)
+    return true
+  } catch (err: unknown) {
+    if (context.isAlive()) {
+      onError?.(err)
+    }
+    return false
+  } finally {
+    lock.release()
+    if (context.isAlive()) {
+      onSettled?.()
+    }
   }
 }
