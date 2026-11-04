@@ -1161,7 +1161,901 @@ try {
     errListCoord.dispose()
   }
 
-  console.log('ALL 8 RUNTIME TEST GROUPS PASSED SUCCESSFULLY!')
+  // ============================================================================
+  // GROUP 9: Regression Tests — Clear Order Details on 401/403/404 & Recovery Guards
+  // ============================================================================
+  console.log('--- [9/9] Testing Terminal 401/403/404 Data Clearing & Recovery Regressions ---')
+  {
+    const regressionResults = []
+    async function runRegressionCase(caseId, fn) {
+      try {
+        await fn()
+        regressionResults.push({ caseId, status: 'PASS' })
+      } catch (err) {
+        regressionResults.push({
+          caseId,
+          status: 'FAIL',
+          message: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+
+    // --------------------------------------------------------------------------
+    // 9A. Reload from loaded order via recoverOrderState() (Data Retention Regression)
+    // --------------------------------------------------------------------------
+    const reloadTerminalCases = [
+      {
+        id: '9A.1 recoverOrderState -> 401 Auth.Unauthorized (terminal after 1 refresh)',
+        errorFactory: () =>
+          new ApiError({
+            status: 401,
+            code: 'Auth.Unauthorized',
+            message: 'Token expired',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+        expectedRefreshCalls: [false, true],
+      },
+      {
+        id: '9A.2 recoverOrderState -> 403 Checkout.AccountInactive',
+        errorFactory: () =>
+          new ApiError({
+            status: 403,
+            code: 'Checkout.AccountInactive',
+            description: 'Current user account is inactive.',
+            message: 'Account inactive',
+          }),
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+        expectedRefreshCalls: [false],
+      },
+      {
+        id: '9A.3 recoverOrderState -> 403 OrderManagement.Forbidden',
+        errorFactory: () =>
+          new ApiError({
+            status: 403,
+            code: 'OrderManagement.Forbidden',
+            description: 'Staff or Admin role is required.',
+            message: 'Forbidden',
+          }),
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+        expectedRefreshCalls: [false],
+      },
+      {
+        id: '9A.4 recoverOrderState -> 404 Checkout.UserNotFound',
+        errorFactory: () =>
+          new ApiError({
+            status: 404,
+            code: 'Checkout.UserNotFound',
+            description: 'Current user account was not found.',
+            message: 'User not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: true,
+          isNotFound: false,
+        },
+        expectedRefreshCalls: [false],
+      },
+      {
+        id: '9A.5 recoverOrderState -> 404 Order.NotFound',
+        errorFactory: () =>
+          new ApiError({
+            status: 404,
+            code: 'Order.NotFound',
+            description: 'Order was not found.',
+            message: 'Order not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+        expectedRefreshCalls: [false],
+      },
+      {
+        id: '9A.6 recoverOrderState -> 404 without code',
+        errorFactory: () =>
+          new ApiError({
+            status: 404,
+            message: 'Not Found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+        expectedRefreshCalls: [false],
+      },
+    ]
+
+    for (const tc of reloadTerminalCases) {
+      await runRegressionCase(tc.id, async () => {
+        let shouldFailGet = false
+        let tokenRefreshHistory = []
+        let patchInvocations = 0
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-1', role: UserRole.Staff },
+            getAccessToken: async (forceRefresh) => {
+              tokenRefreshHistory.push(forceRefresh)
+              return forceRefresh ? 'refreshed-jwt' : 'initial-jwt'
+            },
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => {
+            if (!shouldFailGet) {
+              return makeDetailDto({
+                status: 'Confirmed',
+                paymentMethod: 'COD',
+                paymentStatus: 'Pending',
+              })
+            }
+            throw tc.errorFactory()
+          },
+          patchOrderStatus: async (_id, body) => {
+            patchInvocations += 1
+            return makeDetailDto({
+              status: body.newStatus,
+              paymentMethod: 'COD',
+              paymentStatus: 'Pending',
+            })
+          },
+        })
+
+        // 1. Initial GET succeeds with full customer PII & items
+        const initial = await coord.loadOrderDetail()
+        assert.ok(initial)
+        assert.equal(coord.getState().order?.customerEmail, 'nguyenvana@example.com')
+        assert.equal(coord.getState().order?.customerPhone, '0901234567')
+        assert.equal(coord.getState().order?.items.length, 2)
+
+        // Create a prior mutationSuccessMessage and open confirmDialog before reload
+        assert.ok(coord.openConfirmDialog('Processing'))
+        await coord.submitConfirmedStatusChange()
+        assert.equal(patchInvocations, 1)
+        assert.ok(coord.getState().mutationSuccessMessage)
+        assert.ok(coord.openConfirmDialog('Shipping'))
+        assert.ok(coord.getState().confirmSnapshot)
+
+        // 2. Next GET fails with terminal error when recoverOrderState() is called
+        shouldFailGet = true
+        tokenRefreshHistory = []
+        const recovered = await coord.recoverOrderState()
+        assert.equal(recovered, null)
+
+        const st = coord.getState()
+        assert.equal(st.order, null, 'order must be cleared to null')
+        assert.equal(st.confirmSnapshot, null, 'confirmSnapshot must be closed')
+        assert.equal(
+          st.mutationSuccessMessage,
+          null,
+          'old mutationSuccessMessage must be cleared'
+        )
+        assert.equal(st.isLoading, false)
+        assert.equal(st.isSubmitting, false)
+        assert.equal(st.isStale, false)
+        assert.equal(st.isOutcomeAmbiguous, false)
+        assert.equal(st.isForbidden, tc.expectedFlags.isForbidden, 'isForbidden mismatch')
+        assert.equal(
+          st.isUserNotFound,
+          tc.expectedFlags.isUserNotFound,
+          'isUserNotFound mismatch'
+        )
+        assert.equal(st.isNotFound, tc.expectedFlags.isNotFound, 'isNotFound mismatch')
+        assert.ok(
+          typeof st.loadError === 'string' && st.loadError.trim().length > 0,
+          'loadError must be non-empty for !order UI'
+        )
+        assert.deepEqual(
+          tokenRefreshHistory,
+          tc.expectedRefreshCalls,
+          'token refresh count mismatch'
+        )
+
+        // 3. Cannot open confirm or submit PATCH after order is cleared
+        assert.equal(coord.openConfirmDialog('Shipping'), null)
+        assert.equal(await coord.submitConfirmedStatusChange(), null)
+        assert.equal(patchInvocations, 1, 'Must not call PATCH when order is null')
+        coord.dispose()
+      })
+    }
+
+    // 9A.7: First 401 -> refresh -> GET 200 OK during recoverOrderState()
+    await runRegressionCase(
+      '9A.7 recoverOrderState -> first 401 then refresh -> GET 200 OK keeps order',
+      async () => {
+        let phase = 'initial'
+        let refreshCalls = []
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-1', role: UserRole.Staff },
+            getAccessToken: async (forceRefresh) => {
+              refreshCalls.push(forceRefresh)
+              return forceRefresh ? 'fresh-jwt' : 'expired-jwt'
+            },
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async (_id, token) => {
+            if (phase === 'initial') {
+              return makeDetailDto({ status: 'Confirmed' })
+            }
+            if (token === 'expired-jwt') {
+              throw new ApiError({
+                status: 401,
+                code: 'Auth.Unauthorized',
+                message: 'Expired token',
+              })
+            }
+            return makeDetailDto({ status: 'Processing' })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.equal(coord.getState().order?.status, 'Confirmed')
+
+        phase = 'reload_with_expired_first'
+        refreshCalls = []
+        const result = await coord.recoverOrderState()
+        assert.equal(result?.status, 'Processing')
+        assert.equal(coord.getState().order?.status, 'Processing')
+        assert.equal(coord.getState().loadError, null)
+        assert.equal(coord.getState().isForbidden, false)
+        assert.equal(coord.getState().isNotFound, false)
+        assert.equal(coord.getState().isUserNotFound, false)
+        assert.deepEqual(refreshCalls, [false, true])
+        coord.dispose()
+      }
+    )
+
+    // --------------------------------------------------------------------------
+    // 9B. Recovery after mutation (409 -> GET 403/404, Ambiguous -> GET 403/404, Direct PATCH 401/403/404)
+    // --------------------------------------------------------------------------
+    const post409ReloadCases = [
+      {
+        id: '9B.1 PATCH 409 -> auto-reload GET 403 OrderManagement.Forbidden',
+        getError: () =>
+          new ApiError({
+            status: 403,
+            code: 'OrderManagement.Forbidden',
+            message: 'Forbidden',
+          }),
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.2 PATCH 409 -> auto-reload GET 403 Checkout.AccountInactive',
+        getError: () =>
+          new ApiError({
+            status: 403,
+            code: 'Checkout.AccountInactive',
+            message: 'Account inactive',
+          }),
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.3 PATCH 409 -> auto-reload GET 404 Checkout.UserNotFound',
+        getError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Checkout.UserNotFound',
+            message: 'User not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: true,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.4 PATCH 409 -> auto-reload GET 404 Order.NotFound',
+        getError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Order.NotFound',
+            message: 'Order not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+      },
+    ]
+
+    for (const tc of post409ReloadCases) {
+      await runRegressionCase(tc.id, async () => {
+        let getCount = 0
+        let patchCount = 0
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-2', role: UserRole.Staff },
+            getAccessToken: async () => 'token',
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => {
+            getCount += 1
+            if (getCount === 1) {
+              return makeDetailDto({ status: 'Confirmed' })
+            }
+            throw tc.getError()
+          },
+          patchOrderStatus: async () => {
+            patchCount += 1
+            throw new ApiError({
+              status: 409,
+              code: 'Order.StatusConflict',
+              message: 'Conflict',
+            })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.ok(coord.getState().order)
+        assert.ok(coord.openConfirmDialog('Processing'))
+
+        const res = await coord.submitConfirmedStatusChange()
+        assert.equal(res, null)
+        assert.equal(patchCount, 1, 'Must not send a 2nd PATCH')
+        assert.equal(getCount, 2, '409 must trigger auto-reload GET')
+
+        const st = coord.getState()
+        assert.equal(st.order, null, 'order must be cleared after 409 reload returns 403/404')
+        assert.equal(st.confirmSnapshot, null)
+        assert.equal(st.isLoading, false)
+        assert.equal(st.isSubmitting, false)
+        assert.equal(st.isForbidden, tc.expectedFlags.isForbidden)
+        assert.equal(st.isUserNotFound, tc.expectedFlags.isUserNotFound)
+        assert.equal(st.isNotFound, tc.expectedFlags.isNotFound)
+        assert.ok(
+          typeof st.loadError === 'string' && st.loadError.trim().length > 0,
+          'loadError must be populated for !order view'
+        )
+        coord.dispose()
+      })
+    }
+
+    // Ambiguous outcome (PATCH network/503 after server write) -> recoverOrderState() -> GET 403 or 404
+    const postAmbiguousCases = [
+      {
+        id: '9B.5 Ambiguous PATCH (503) -> recoverOrderState GET 403 Checkout.AccountInactive',
+        getError: () =>
+          new ApiError({
+            status: 403,
+            code: 'Checkout.AccountInactive',
+            message: 'Account inactive',
+          }),
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.6a Ambiguous PATCH (network) -> recoverOrderState GET 404 Order.NotFound',
+        getError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Order.NotFound',
+            message: 'Order not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+      },
+      {
+        id: '9B.6b Ambiguous PATCH (network) -> recoverOrderState GET 404 Checkout.UserNotFound',
+        getError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Checkout.UserNotFound',
+            message: 'User not found',
+          }),
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: true,
+          isNotFound: false,
+        },
+      },
+    ]
+
+    for (const tc of postAmbiguousCases) {
+      await runRegressionCase(tc.id, async () => {
+        let serverStatus = 'Confirmed'
+        let failRecoveryGet = false
+        let patchCalls = 0
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-3', role: UserRole.Staff },
+            getAccessToken: async () => 'token',
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => {
+            if (!failRecoveryGet) {
+              return makeDetailDto({ status: serverStatus })
+            }
+            throw tc.getError()
+          },
+          patchOrderStatus: async (_id, body) => {
+            patchCalls += 1
+            // Server commits new status, but response fails with 503
+            serverStatus = body.newStatus
+            throw new ApiError({
+              status: 503,
+              message: 'Service Unavailable',
+            })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.ok(coord.openConfirmDialog('Processing'))
+        await coord.submitConfirmedStatusChange()
+
+        assert.equal(patchCalls, 1)
+        assert.equal(coord.getState().isOutcomeAmbiguous, true)
+        assert.ok(coord.getState().order)
+
+        failRecoveryGet = true
+        const rec = await coord.recoverOrderState()
+        assert.equal(rec, null)
+        assert.equal(patchCalls, 1, 'Must never auto-PATCH during recovery')
+
+        const st = coord.getState()
+        assert.equal(st.order, null, 'order must be cleared on terminal recovery error')
+        assert.equal(st.confirmSnapshot, null)
+        assert.equal(st.isOutcomeAmbiguous, false)
+        assert.equal(st.isStale, false)
+        assert.equal(st.isForbidden, tc.expectedFlags.isForbidden)
+        assert.equal(st.isUserNotFound, tc.expectedFlags.isUserNotFound)
+        assert.equal(st.isNotFound, tc.expectedFlags.isNotFound)
+        assert.equal(
+          st.mutationError,
+          null,
+          'must not keep ambiguous mutationError once access/entity is lost'
+        )
+        assert.ok(
+          typeof st.loadError === 'string' && st.loadError.trim().length > 0,
+          'loadError must be set for !order UI'
+        )
+        coord.dispose()
+      })
+    }
+
+    // Direct PATCH terminal 401 / 403 / 404
+    const directPatchTerminalCases = [
+      {
+        id: '9B.7 Direct PATCH -> terminal 401 Auth.Unauthorized (retries auth once)',
+        patchError: () =>
+          new ApiError({
+            status: 401,
+            code: 'Auth.Unauthorized',
+            message: 'Unauthorized',
+          }),
+        expectedPatchCalls: 2,
+        expectedRefreshCalls: [false, true],
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.8a Direct PATCH -> 403 OrderManagement.Forbidden',
+        patchError: () =>
+          new ApiError({
+            status: 403,
+            code: 'OrderManagement.Forbidden',
+            message: 'Forbidden',
+          }),
+        expectedPatchCalls: 1,
+        expectedRefreshCalls: [false],
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.8b Direct PATCH -> 403 Checkout.AccountInactive',
+        patchError: () =>
+          new ApiError({
+            status: 403,
+            code: 'Checkout.AccountInactive',
+            message: 'Account inactive',
+          }),
+        expectedPatchCalls: 1,
+        expectedRefreshCalls: [false],
+        expectedFlags: {
+          isForbidden: true,
+          isUserNotFound: false,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.9a Direct PATCH -> 404 Checkout.UserNotFound',
+        patchError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Checkout.UserNotFound',
+            message: 'User not found',
+          }),
+        expectedPatchCalls: 1,
+        expectedRefreshCalls: [false],
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: true,
+          isNotFound: false,
+        },
+      },
+      {
+        id: '9B.9b Direct PATCH -> 404 Order.NotFound',
+        patchError: () =>
+          new ApiError({
+            status: 404,
+            code: 'Order.NotFound',
+            message: 'Order not found',
+          }),
+        expectedPatchCalls: 1,
+        expectedRefreshCalls: [false],
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+      },
+      {
+        id: '9B.9c Direct PATCH -> 404 without code',
+        patchError: () =>
+          new ApiError({
+            status: 404,
+            message: 'Not Found',
+          }),
+        expectedPatchCalls: 1,
+        expectedRefreshCalls: [false],
+        expectedFlags: {
+          isForbidden: false,
+          isUserNotFound: false,
+          isNotFound: true,
+        },
+      },
+    ]
+
+    for (const tc of directPatchTerminalCases) {
+      await runRegressionCase(tc.id, async () => {
+        let patchCalls = 0
+        let refreshCalls = []
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-4', role: UserRole.Staff },
+            getAccessToken: async (forceRefresh) => {
+              refreshCalls.push(forceRefresh)
+              return forceRefresh ? 'token-2' : 'token-1'
+            },
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => makeDetailDto({ status: 'Confirmed' }),
+          patchOrderStatus: async () => {
+            patchCalls += 1
+            throw tc.patchError()
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.ok(coord.getState().order)
+        assert.ok(coord.openConfirmDialog('Processing'))
+
+        refreshCalls = []
+        const res = await coord.submitConfirmedStatusChange()
+        assert.equal(res, null)
+        assert.equal(patchCalls, tc.expectedPatchCalls)
+        assert.deepEqual(refreshCalls, tc.expectedRefreshCalls)
+
+        const st = coord.getState()
+        assert.equal(st.order, null, 'order must be cleared on direct PATCH 401/403/404')
+        assert.equal(st.confirmSnapshot, null)
+        assert.equal(st.isLoading, false)
+        assert.equal(st.isSubmitting, false)
+        assert.equal(st.isForbidden, tc.expectedFlags.isForbidden)
+        assert.equal(st.isUserNotFound, tc.expectedFlags.isUserNotFound)
+        assert.equal(st.isNotFound, tc.expectedFlags.isNotFound)
+        assert.ok(
+          typeof st.loadError === 'string' && st.loadError.trim().length > 0,
+          'loadError must be populated so !order UI renders reason'
+        )
+        assert.equal(coord.openConfirmDialog('Processing'), null)
+        assert.equal(await coord.submitConfirmedStatusChange(), null)
+        assert.equal(patchCalls, tc.expectedPatchCalls)
+        coord.dispose()
+      })
+    }
+
+    // --------------------------------------------------------------------------
+    // 9C. Valid recovery & prevention of stale data re-appearance
+    // --------------------------------------------------------------------------
+    await runRegressionCase(
+      '9C.1 Ambiguous PATCH -> GET 503/status 0 keeps order & locks -> GET 200 unlocks',
+      async () => {
+        let serverOrder = makeDetailDto({ status: 'Confirmed' })
+        let getMode = 'ok'
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'admin-reg-1', role: UserRole.Admin },
+            getAccessToken: async () => 'token',
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => {
+            if (getMode === '503') {
+              throw new ApiError({ status: 503, message: 'Server busy' })
+            }
+            if (getMode === 'net0') {
+              throw new ApiError({
+                status: 0,
+                message: 'Network down',
+                isNetworkError: true,
+              })
+            }
+            return { ...serverOrder }
+          },
+          patchOrderStatus: async (_id, body) => {
+            serverOrder = { ...serverOrder, status: body.newStatus }
+            throw new ApiError({
+              status: 0,
+              message: 'Timeout',
+              isNetworkError: true,
+            })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        coord.openConfirmDialog('Processing')
+        await coord.submitConfirmedStatusChange()
+        assert.equal(coord.getState().isOutcomeAmbiguous, true)
+        assert.ok(coord.getState().order)
+
+        // Recovery GET 503 keeps existing order and keeps lock
+        getMode = '503'
+        await coord.recoverOrderState()
+        assert.ok(coord.getState().order, '503 must not clear existing order during recovery')
+        assert.equal(coord.getState().isOutcomeAmbiguous, true)
+        assert.equal(coord.getState().isStale, true)
+        assert.equal(coord.openConfirmDialog('Shipping'), null)
+
+        // Recovery GET status 0 also keeps existing order and keeps lock
+        getMode = 'net0'
+        await coord.recoverOrderState()
+        assert.ok(coord.getState().order, 'status 0 must not clear existing order during recovery')
+        assert.equal(coord.getState().isOutcomeAmbiguous, true)
+        assert.equal(coord.getState().isStale, true)
+        assert.equal(coord.openConfirmDialog('Shipping'), null)
+
+        // Subsequent GET 200 unlocks and renders real server status ('Processing')
+        getMode = 'ok'
+        const recovered = await coord.recoverOrderState()
+        assert.equal(recovered?.status, 'Processing')
+        assert.equal(coord.getState().order?.status, 'Processing')
+        assert.equal(coord.getState().isOutcomeAmbiguous, false)
+        assert.equal(coord.getState().isStale, false)
+        assert.equal(coord.getState().loadError, null)
+        assert.equal(coord.getState().mutationError, null)
+        assert.ok(coord.openConfirmDialog('Shipping'))
+        coord.dispose()
+      }
+    )
+
+    await runRegressionCase(
+      '9C.2 Cleared 403/404 -> subsequent valid GET 200 clears old flags & renders DTO',
+      async () => {
+        let mode = 'ok'
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-5', role: UserRole.Staff },
+            getAccessToken: async () => 'token',
+            orderId: ORDER_ID_A,
+          }),
+          fetchOrderById: async () => {
+            if (mode === '403') {
+              throw new ApiError({
+                status: 403,
+                code: 'OrderManagement.Forbidden',
+                message: 'Forbidden',
+              })
+            }
+            if (mode === '404_user') {
+              throw new ApiError({
+                status: 404,
+                code: 'Checkout.UserNotFound',
+                message: 'User missing',
+              })
+            }
+            return makeDetailDto({ status: 'Confirmed' })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.ok(coord.getState().order)
+
+        mode = '403'
+        await coord.recoverOrderState()
+        assert.equal(coord.getState().order, null)
+        assert.equal(coord.getState().isForbidden, true)
+
+        // Transition from 403 to 404 UserNotFound must not retain isForbidden=true
+        mode = '404_user'
+        await coord.recoverOrderState()
+        assert.equal(coord.getState().order, null)
+        assert.equal(coord.getState().isForbidden, false)
+        assert.equal(coord.getState().isUserNotFound, true)
+        assert.equal(coord.getState().isNotFound, false)
+
+        // Transition to valid 200 OK clears all error flags
+        mode = 'ok'
+        await coord.recoverOrderState()
+        assert.equal(coord.getState().order?.id, ORDER_ID_A)
+        assert.equal(coord.getState().isForbidden, false)
+        assert.equal(coord.getState().isUserNotFound, false)
+        assert.equal(coord.getState().isNotFound, false)
+        assert.equal(coord.getState().loadError, null)
+        coord.dispose()
+      }
+    )
+
+    await runRegressionCase(
+      '9C.3 Hung older GET resolving 200 after newer recovery GET 403/404 must not resurrect order',
+      async () => {
+        const hungGetDef = createDeferred()
+        let callNum = 0
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: 'staff-reg-6', role: UserRole.Staff },
+            getAccessToken: async () => 'token',
+            orderId: ORDER_ID_A,
+          }),
+          // Mock intentionally ignores AbortSignal to verify readGeneration guard
+          fetchOrderById: async () => {
+            callNum += 1
+            if (callNum === 1) {
+              return makeDetailDto({ status: 'Confirmed' })
+            }
+            if (callNum === 2) {
+              return hungGetDef.promise
+            }
+            throw new ApiError({
+              status: 403,
+              code: 'Checkout.AccountInactive',
+              message: 'Inactive',
+            })
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.ok(coord.getState().order)
+
+        // Start hung GET #2
+        const hungPromise = coord.recoverOrderState()
+        await Promise.resolve()
+
+        // Start newer recovery GET #3 which fails with 403 and clears order
+        const newerPromise = coord.recoverOrderState()
+        await newerPromise
+        assert.equal(coord.getState().order, null)
+        assert.equal(coord.getState().isForbidden, true)
+
+        // Now hung GET #2 resolves with 200 OK -> must NOT resurrect order!
+        hungGetDef.resolve(makeDetailDto({ status: 'Processing' }))
+        await hungPromise
+        assert.equal(
+          coord.getState().order,
+          null,
+          'Hung older GET 200 must never overwrite newer terminal 403 state'
+        )
+        assert.equal(coord.getState().isForbidden, true)
+        coord.dispose()
+      }
+    )
+
+    await runRegressionCase(
+      '9C.4 Owner/orderId switch or dispose while recovery GET is pending ignores late response/error',
+      async () => {
+        const pendingRecDef = createDeferred()
+        let currentOrderId = ORDER_ID_A
+        let currentUserId = 'staff-reg-7'
+        let callIdx = 0
+
+        const coord = adminOrderMod.createManagedOrderDetailCoordinator({
+          getContext: () => ({
+            authStatus: 'authenticated',
+            user: { id: currentUserId, role: UserRole.Staff },
+            getAccessToken: async () => 'token',
+            orderId: currentOrderId,
+          }),
+          fetchOrderById: async () => {
+            callIdx += 1
+            if (callIdx === 1) {
+              return makeDetailDto({ id: ORDER_ID_A, status: 'Confirmed' })
+            }
+            return pendingRecDef.promise
+          },
+        })
+
+        await coord.loadOrderDetail()
+        assert.equal(coord.getState().order?.id, ORDER_ID_A)
+
+        // Start pending recovery GET on ORDER_ID_A
+        const recPromise = coord.recoverOrderState()
+        await Promise.resolve()
+
+        // Switch context to ORDER_ID_B and different owner before recovery GET settles
+        currentOrderId = ORDER_ID_B
+        currentUserId = 'staff-reg-8'
+        coord.syncContext()
+        assert.equal(coord.getState().order, null)
+        assert.equal(coord.getState().orderId, ORDER_ID_B)
+
+        // Reject pending recovery GET from old context -> must not pollute new context
+        pendingRecDef.reject(
+          new ApiError({
+            status: 403,
+            code: 'OrderManagement.Forbidden',
+            message: 'Forbidden old context',
+          })
+        )
+        await recPromise
+        assert.equal(coord.getState().isForbidden, false)
+        assert.equal(coord.getState().loadError, null)
+        coord.dispose()
+      }
+    )
+
+    const failedRegressionCases = regressionResults.filter((r) => r.status === 'FAIL')
+    for (const r of regressionResults) {
+      if (r.status === 'FAIL') {
+        console.error(`  [FAIL] ${r.caseId}: ${r.message}`)
+      } else {
+        console.log(`  [PASS] ${r.caseId}`)
+      }
+    }
+    assert.equal(
+      failedRegressionCases.length,
+      0,
+      `${failedRegressionCases.length} regression case(s) failed`
+    )
+  }
+
+  console.log('ALL 9 RUNTIME TEST GROUPS PASSED SUCCESSFULLY!')
 } finally {
   fs.rmSync(tempRoot, { recursive: true, force: true })
 }

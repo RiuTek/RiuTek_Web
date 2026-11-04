@@ -977,6 +977,65 @@ export function createManagedOrderDetailCoordinator(
     }
   }
 
+  const classifyDetailError = (err: unknown, fallbackMessage: string) => {
+    const code = err instanceof ApiError ? (err.code ?? null) : null
+    const status = err instanceof ApiError ? err.status : 0
+
+    const isUnauthorized =
+      status === 401 ||
+      code === 'Auth.Unauthorized' ||
+      code === 'Checkout.Unauthorized'
+
+    const isForbidden =
+      !isUnauthorized &&
+      (status === 403 ||
+        code === 'OrderManagement.Forbidden' ||
+        code === 'Checkout.AccountInactive' ||
+        code === 'Auth.Forbidden' ||
+        code === 'User.AccountInactive')
+
+    const isUserNotFound =
+      !isUnauthorized && !isForbidden && code === 'Checkout.UserNotFound'
+
+    const isOrderNotFound =
+      !isUnauthorized &&
+      !isForbidden &&
+      !isUserNotFound &&
+      (status === 404 || code === 'Order.NotFound')
+
+    const isTerminalAccessOrMissing =
+      isUnauthorized || isForbidden || isUserNotFound || isOrderNotFound
+
+    const resolvedCode =
+      code ??
+      (isUnauthorized
+        ? 'Auth.Unauthorized'
+        : isForbidden
+          ? 'OrderManagement.Forbidden'
+          : isUserNotFound
+            ? 'Checkout.UserNotFound'
+            : isOrderNotFound
+              ? 'Order.NotFound'
+              : null)
+
+    const mappedMessage =
+      !code && resolvedCode && ADMIN_ERROR_MESSAGES[resolvedCode]
+        ? ADMIN_ERROR_MESSAGES[resolvedCode]
+        : mapAdminApiError(err, fallbackMessage)
+
+    return {
+      code,
+      resolvedCode,
+      status,
+      isUnauthorized,
+      isForbidden,
+      isUserNotFound,
+      isOrderNotFound,
+      isTerminalAccessOrMissing,
+      mappedMessage,
+    }
+  }
+
   const loadOrderDetail = async (options?: {
     preserveMutationNotice?: boolean
     keepStaleOnFailure?: boolean
@@ -997,6 +1056,7 @@ export function createManagedOrderDetailCoordinator(
       emit({
         order: null,
         isLoading: false,
+        isSubmitting: false,
         loadError:
           ADMIN_ERROR_MESSAGES['Order.InvalidId'] ??
           'Mã định danh đơn hàng (ID) không đúng định dạng UUID.',
@@ -1004,7 +1064,12 @@ export function createManagedOrderDetailCoordinator(
         isNotFound: true,
         isUserNotFound: false,
         isForbidden: false,
+        isStale: false,
+        isOutcomeAmbiguous: false,
         confirmSnapshot: null,
+        mutationError: null,
+        mutationErrorCode: null,
+        mutationSuccessMessage: null,
       })
       return null
     }
@@ -1035,6 +1100,7 @@ export function createManagedOrderDetailCoordinator(
       loadErrorCode: null,
       isNotFound: false,
       isUserNotFound: false,
+      isForbidden: false,
       confirmSnapshot: null,
       ...(options?.preserveMutationNotice || state.isOutcomeAmbiguous
         ? {}
@@ -1081,46 +1147,67 @@ export function createManagedOrderDetailCoordinator(
       if (err instanceof Error && err.name === 'AbortError') return null
       if (err instanceof ApiError && err.isAbortError) return null
 
-      const code = err instanceof ApiError ? (err.code ?? null) : null
-      const status = err instanceof ApiError ? err.status : 0
-      const isUserNotFound = code === 'Checkout.UserNotFound'
-      const isOrderNotFound =
-        !isUserNotFound && (status === 404 || code === 'Order.NotFound')
-      const isForbidden =
-        status === 403 ||
-        code === 'OrderManagement.Forbidden' ||
-        code === 'Checkout.AccountInactive' ||
-        code === 'Auth.Forbidden'
-      const isUnauthorized = status === 401 || code === 'Auth.Unauthorized' || code === 'Checkout.Unauthorized'
-
-      const mappedMessage = mapAdminApiError(
+      const {
+        code,
+        resolvedCode,
+        isForbidden,
+        isUserNotFound,
+        isOrderNotFound,
+        isTerminalAccessOrMissing,
+        mappedMessage,
+      } = classifyDetailError(
         err,
         'Không thể tải thông tin chi tiết đơn hàng. Vui lòng kiểm tra kết nối mạng và thử lại.'
       )
 
-      // Nếu đang recover từ 409 hoặc ambiguous outcome mà GET bị lỗi, giữ nguyên khóa isStale / isOutcomeAmbiguous
+      // Phân loại lỗi truy cập/không tồn tại (401/403/404) TRƯỚC quyết định giữ dữ liệu stale:
+      // Xóa ngay dữ liệu đơn hàng cũ, đóng confirmSnapshot, kết thúc loading/submitting, xóa thông báo cũ
+      if (isTerminalAccessOrMissing) {
+        emit({
+          order: null,
+          isLoading: false,
+          isSubmitting: false,
+          loadError: mappedMessage,
+          loadErrorCode: resolvedCode,
+          isNotFound: isOrderNotFound,
+          isUserNotFound,
+          isForbidden,
+          isStale: false,
+          isOutcomeAmbiguous: false,
+          confirmSnapshot: null,
+          mutationError: null,
+          mutationErrorCode: null,
+          mutationSuccessMessage: null,
+        })
+        return null
+      }
+
+      // Nếu đang recover từ 409 hoặc ambiguous outcome mà GET bị lỗi tạm thời (mạng/status 0/5xx), giữ nguyên khóa isStale / isOutcomeAmbiguous
       if (options?.keepStaleOnFailure && state.order) {
         emit({
           isLoading: false,
           loadError: mappedMessage,
           loadErrorCode: code,
-          isForbidden: isForbidden || state.isForbidden,
+          isNotFound: false,
+          isUserNotFound: false,
+          isForbidden: false,
           isStale: true,
           confirmSnapshot: null,
-          ...(isUnauthorized ? { order: null } : {}),
+          mutationSuccessMessage: null,
         })
         return null
       }
 
       emit({
-        order: isUnauthorized || isForbidden || isOrderNotFound || isUserNotFound ? null : state.order,
+        order: state.order,
         isLoading: false,
         loadError: mappedMessage,
         loadErrorCode: code,
-        isNotFound: isOrderNotFound,
-        isUserNotFound,
-        isForbidden,
+        isNotFound: false,
+        isUserNotFound: false,
+        isForbidden: false,
         confirmSnapshot: null,
+        mutationSuccessMessage: null,
       })
       return null
     }
@@ -1196,9 +1283,13 @@ export function createManagedOrderDetailCoordinator(
       if (state.confirmSnapshot !== null) {
         emit({
           confirmSnapshot: null,
-          mutationError:
-            'Thao tác xác nhận không còn khớp với trạng thái đơn hàng hiện tại. Vui lòng kiểm tra lại đơn hàng.',
-          mutationErrorCode: 'Order.StaleConfirmSnapshot',
+          ...(state.order
+            ? {
+                mutationError:
+                  'Thao tác xác nhận không còn khớp với trạng thái đơn hàng hiện tại. Vui lòng kiểm tra lại đơn hàng.',
+                mutationErrorCode: 'Order.StaleConfirmSnapshot',
+              }
+            : {}),
         })
       }
       return null
@@ -1286,6 +1377,9 @@ export function createManagedOrderDetailCoordinator(
         order: updatedOrder,
         isSubmitting: false,
         confirmSnapshot: null,
+        isNotFound: false,
+        isUserNotFound: false,
+        isForbidden: false,
         isStale: false,
         isOutcomeAmbiguous: false,
         loadError: null,
@@ -1311,10 +1405,42 @@ export function createManagedOrderDetailCoordinator(
         return null
       }
 
-      const status = err instanceof ApiError ? err.status : 0
-      const code = err instanceof ApiError ? (err.code ?? null) : null
+      const {
+        code,
+        resolvedCode,
+        status,
+        isForbidden,
+        isUserNotFound,
+        isOrderNotFound,
+        isTerminalAccessOrMissing,
+        mappedMessage,
+      } = classifyDetailError(
+        err,
+        'Không thể cập nhật trạng thái đơn hàng. Vui lòng kiểm tra lại dữ liệu.'
+      )
 
-      // 1. Xử lý 409 Conflict: đóng confirm cũ, báo lỗi rõ ràng, đánh dấu stale + khóa action và tự động reload GET
+      // 1. Xử lý lỗi terminal 401 / 403 / 404 trên PATCH: xóa ngay dữ liệu đơn hàng, đóng confirm, gán loadError để nhánh !order hiển thị lý do
+      if (isTerminalAccessOrMissing) {
+        emit({
+          order: null,
+          isLoading: false,
+          isSubmitting: false,
+          loadError: mappedMessage,
+          loadErrorCode: resolvedCode,
+          isNotFound: isOrderNotFound,
+          isUserNotFound,
+          isForbidden,
+          isStale: false,
+          isOutcomeAmbiguous: false,
+          confirmSnapshot: null,
+          mutationError: mappedMessage,
+          mutationErrorCode: resolvedCode,
+          mutationSuccessMessage: null,
+        })
+        return null
+      }
+
+      // 2. Xử lý 409 Conflict: đóng confirm cũ, báo lỗi rõ ràng, đánh dấu stale + khóa action và tự động reload GET
       if (
         status === 409 ||
         code === 'Order.StatusConflict' ||
@@ -1346,7 +1472,7 @@ export function createManagedOrderDetailCoordinator(
         return null
       }
 
-      // 2. Xử lý lỗi mạng / timeout / 5xx: kết quả trên BE chưa xác định -> KHÔNG tự retry PATCH, khóa action cho tới khi GET thành công
+      // 3. Xử lý lỗi mạng / timeout / 5xx: kết quả trên BE chưa xác định -> KHÔNG tự retry PATCH, khóa action cho tới khi GET thành công
       const isAmbiguous =
         !(err instanceof ApiError) ||
         err.isNetworkError ||
@@ -1366,57 +1492,11 @@ export function createManagedOrderDetailCoordinator(
         return null
       }
 
-      // 3. Xử lý 403 Forbidden
-      if (
-        status === 403 ||
-        code === 'OrderManagement.Forbidden' ||
-        code === 'Checkout.AccountInactive' ||
-        code === 'Auth.Forbidden'
-      ) {
-        emit({
-          isSubmitting: false,
-          confirmSnapshot: null,
-          isForbidden: true,
-          mutationError: mapAdminApiError(
-            err,
-            'Tài khoản của bạn không có quyền thực hiện thao tác cập nhật đơn hàng này.'
-          ),
-          mutationErrorCode: code ?? 'OrderManagement.Forbidden',
-          mutationSuccessMessage: null,
-        })
-        return null
-      }
-
-      // 4. Xử lý 404 NotFound (Order.NotFound hoặc Checkout.UserNotFound)
-      if (status === 404 || code === 'Order.NotFound' || code === 'Checkout.UserNotFound') {
-        const isUserMissing = code === 'Checkout.UserNotFound'
-        emit({
-          isSubmitting: false,
-          confirmSnapshot: null,
-          order: isUserMissing ? null : state.order,
-          isNotFound: !isUserMissing,
-          isUserNotFound: isUserMissing,
-          isStale: true,
-          mutationError: mapAdminApiError(
-            err,
-            isUserMissing
-              ? 'Không tìm thấy tài khoản quản trị hiện tại.'
-              : 'Đơn hàng này không còn tồn tại trên hệ thống.'
-          ),
-          mutationErrorCode: code ?? 'Order.NotFound',
-          mutationSuccessMessage: null,
-        })
-        return null
-      }
-
-      // 5. Xử lý 400 Bad Request hoặc lỗi khác
+      // 4. Xử lý 400 Bad Request hoặc lỗi khác
       emit({
         isSubmitting: false,
         confirmSnapshot: null,
-        mutationError: mapAdminApiError(
-          err,
-          'Không thể cập nhật trạng thái đơn hàng. Vui lòng kiểm tra lại dữ liệu.'
-        ),
+        mutationError: mappedMessage,
         mutationErrorCode: code,
         mutationSuccessMessage: null,
       })
