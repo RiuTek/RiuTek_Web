@@ -312,26 +312,49 @@ export function isSaveConfirmationValid(params: {
   return true
 }
 
+export type SaveLockLease = symbol
+
+export interface SingleFlightLock {
+  tryAcquire: () => SaveLockLease | null
+  release: (lease?: SaveLockLease | null) => boolean
+  resetForContextChange: () => void
+  isInFlight: () => boolean
+}
+
 /**
- * Khóa đồng bộ đơn lượt (synchronous in-flight lock) chống double-click và Enter kép
+ * Khóa đồng bộ đơn lượt (synchronous in-flight lock) theo cơ chế lease token:
+ * - tryAcquire() trả về một unique lease (Symbol) cho lần acquire thành công, hoặc null nếu đang bận
+ * - release(lease) chỉ giải phóng nếu lease đúng với lease đang giữ khóa (idempotent, no-op nếu lease sai/cũ)
+ * - resetForContextChange() vô hiệu hóa lease cũ và giải phóng để context mới có thể acquire ngay
+ * - isInFlight() kiểm tra xem khóa có đang được giữ bởi một lease nào hay không
  */
-export function createSingleFlightLock() {
-  let inFlight = false
+export function createSingleFlightLock(): SingleFlightLock {
+  let activeLease: SaveLockLease | null = null
 
   return {
-    tryAcquire: (): boolean => {
-      if (inFlight) return false
-      inFlight = true
+    tryAcquire: (): SaveLockLease | null => {
+      if (activeLease !== null) {
+        return null
+      }
+      const lease = Symbol('save-lock-lease')
+      activeLease = lease
+      return lease
+    },
+    release: (lease?: SaveLockLease | null): boolean => {
+      if (!lease || activeLease === null || activeLease !== lease) {
+        return false
+      }
+      activeLease = null
       return true
     },
-    release: () => {
-      inFlight = false
+    resetForContextChange: () => {
+      activeLease = null
     },
-    isInFlight: (): boolean => inFlight,
+    isInFlight: (): boolean => activeLease !== null,
   }
 }
 
-export type SaveOperationLock = ReturnType<typeof createSingleFlightLock>
+export type SaveOperationLock = SingleFlightLock
 
 export interface SaveOperationContext {
   isAlive: () => boolean
@@ -398,12 +421,12 @@ export interface ExecutePCBuildSaveParams<TPayload, TResult> {
 
 /**
  * Helper production thực thi quy trình lưu bất đồng bộ dùng chung cho cả Create và Edit:
- * 1. Khóa synchronous single-flight lock
+ * 1. Khóa synchronous single-flight lock lấy lease token
  * 2. Kiểm tra context.isAlive() trước và sau mỗi điểm await (token, 401 refresh, mutation)
  * 3. Nếu unmount trước khi gửi mutation -> mutation calls = 0
  * 4. Xử lý retry 401 với fresh token đúng tối đa 1 lần
  * 5. Bỏ qua response và không gọi callbacks nếu context đã unmount hoặc đổi session/build
- * 6. Giải phóng lock trong finally
+ * 6. Chỉ giải phóng khóa bằng đúng lease của operation này trong finally
  */
 export async function executePCBuildSaveOperation<TPayload, TResult>(
   params: ExecutePCBuildSaveParams<TPayload, TResult>
@@ -420,18 +443,22 @@ export async function executePCBuildSaveOperation<TPayload, TResult>(
     onSettled,
   } = params
 
-  if (!lock.tryAcquire()) {
+  const lease = lock.tryAcquire()
+  if (!lease) {
     return false
   }
-
-  if (!context.isAlive()) {
-    lock.release()
-    return false
-  }
-
-  onStart?.()
 
   try {
+    if (!context.isAlive()) {
+      return false
+    }
+
+    try {
+      onStart?.()
+    } catch {
+      return false
+    }
+
     const token = await getAccessToken(false)
     if (!context.isAlive()) {
       return false
@@ -474,7 +501,7 @@ export async function executePCBuildSaveOperation<TPayload, TResult>(
     }
     return false
   } finally {
-    lock.release()
+    lock.release(lease)
     if (context.isAlive()) {
       onSettled?.()
     }

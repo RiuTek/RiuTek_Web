@@ -122,9 +122,11 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
 
   useEffect(() => {
     const lifecycle = lifecycleRef.current
+    const saveLock = saveLockRef.current
     lifecycle.mount()
     return () => {
       lifecycle.unmount()
+      saveLock.resetForContextChange()
     }
   }, [])
 
@@ -136,7 +138,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
 
       // Vô hiệu hóa mọi in-flight request của session trước
       addToCartSequenceRef.current += 1
-      saveLockRef.current.release()
+      saveLockRef.current.resetForContextChange()
 
       // Reset toàn bộ state mutation, saved build, form & modal của account trước
       setSavedBuildInfo(null)

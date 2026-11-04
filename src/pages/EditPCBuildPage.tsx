@@ -149,6 +149,7 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   const isMountedRef = useRef(true)
   const userRef = useRef(user)
   const buildIdRef = useRef(buildId)
+  const activeContextKeyRef = useRef(`${ownerId}:${buildId}`)
   const recordSeqRef = useRef(0)
   const previewSeqRef = useRef(0)
   const previewAbortRef = useRef<AbortController | null>(null)
@@ -161,13 +162,13 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   useEffect(() => {
     isMountedRef.current = true
     const lifecycle = lifecycleRef.current
-    lifecycle.mount()
     const putLock = putLockRef.current
+    lifecycle.mount()
     return () => {
       isMountedRef.current = false
       lifecycle.unmount()
+      putLock.resetForContextChange()
       isSaveSuccessBypassRef.current = false
-      putLock.release()
       if (previewAbortRef.current) {
         previewAbortRef.current.abort()
       }
@@ -177,9 +178,13 @@ const EditPCBuildContent: React.FC<EditPCBuildContentProps> = ({
   useEffect(() => {
     userRef.current = user
     buildIdRef.current = buildId
-    isSaveSuccessBypassRef.current = false
-    lifecycleRef.current.updateContext(ownerId, buildId)
-    putLockRef.current.release()
+    const currentContextKey = `${ownerId}:${buildId}`
+    if (activeContextKeyRef.current !== currentContextKey) {
+      activeContextKeyRef.current = currentContextKey
+      isSaveSuccessBypassRef.current = false
+      lifecycleRef.current.updateContext(ownerId, buildId)
+      putLockRef.current.resetForContextChange()
+    }
   }, [user, ownerId, buildId])
 
   // Snapshot xác nhận hợp lệ theo cấu hình và ngữ cảnh hiện tại
