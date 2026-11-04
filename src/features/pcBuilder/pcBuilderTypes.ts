@@ -107,19 +107,37 @@ export interface SelectedPCBuildItem {
 }
 
 /**
- * State của 15 bộ lọc kỹ thuật cho PC Builder modal
+ * State của 15 bộ lọc kỹ thuật cho PC Builder modal (hỗ trợ cả plural arrays và legacy scalar)
  */
 export interface PCBuilderTechnicalFilterState {
+  brands?: string[]
   socket?: CpuSocket
+  sockets?: CpuSocket[]
   memoryType?: RamType
+  memoryTypes?: RamType[]
   motherboardFormFactor?: MotherboardFormFactor
+  motherboardFormFactors?: MotherboardFormFactor[]
   ramFormFactor?: RamFormFactor
+  ramFormFactors?: RamFormFactor[]
   storageType?: StorageType
+  storageTypes?: StorageType[]
   storageInterface?: StorageInterface
+  storageInterfaces?: StorageInterface[]
   psuEfficiency?: PsuEfficiency
+  psuEfficiencies?: PsuEfficiency[]
   psuModularity?: PsuModularity
+  psuModularities?: PsuModularity[]
   psuFormFactor?: PsuFormFactor
+  psuFormFactors?: PsuFormFactor[]
   coolerType?: CoolerType
+  coolerTypes?: CoolerType[]
+  coreCounts?: number[]
+  vramGbs?: number[]
+  gpuLengthsMm?: number[]
+  ramCapacitiesGb?: number[]
+  ramSpeedsMhz?: number[]
+  storageCapacitiesGb?: number[]
+  psuWattages?: number[]
   hasIntegratedGpu?: boolean
   hasWifi?: boolean
   hasRgb?: boolean

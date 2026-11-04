@@ -18,78 +18,86 @@ import {
   FEATURED_PRODUCTS_DATA,
   SERVICE_BENEFITS,
 } from '../data/homeMockData'
+import { HomeCategoryMenu } from '../features/products/components/HomeCategoryMenu'
 
 export const HomePage: React.FC = () => {
   return (
     <div className="w-full flex flex-col space-y-12 sm:space-y-16 pb-16">
-      {/* 1. HERO SECTION: Asymmetric Editorial Split */}
+      {/* 1. HERO SECTION: Category Menu + Editorial Hero Split */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-          {/* Left Content Column */}
-          <div className="lg:col-span-7 bg-white p-6 sm:p-10 lg:p-12 rounded-3xl shadow-[0_12px_40px_rgba(220,38,38,0.06)] border border-red-100/70 flex flex-col justify-between relative overflow-hidden">
-            <div className="absolute -right-20 -top-20 w-72 h-72 bg-red-100/40 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -left-20 -bottom-20 w-72 h-72 bg-slate-100/60 rounded-full blur-3xl pointer-events-none" />
-
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-red-50 border border-red-200/80 rounded-full mb-6 shadow-sm">
-                <Flame className="w-4 h-4 text-red-600" />
-                <span className="text-xs font-extrabold text-red-600 uppercase tracking-wider">
-                  Hệ Sinh Thái Phần Cứng PC
-                </span>
-              </div>
-
-              <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-950 tracking-tight mb-5 leading-tight">
-                Kỷ nguyên hiệu năng PC: Khám phá{' '}
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-red-500 to-rose-700">
-                  Phần Cứng Đỉnh Cao
-                </span>{' '}
-                &amp; Tối Ưu Cấu Hình.
-              </h1>
-
-              <p className="text-base sm:text-lg text-slate-600 max-w-xl mb-8 leading-relaxed">
-                Nền tảng thương mại điện tử linh kiện máy tính, hệ thống PC Gaming và máy trạm AI. Hỗ trợ người dùng từ cơ bản đến chuyên sâu dễ dàng lựa chọn linh kiện tương thích và cân bằng hiệu năng.
-              </p>
-
-              <div className="flex flex-wrap items-center gap-3.5">
-                <Link
-                  to="/pc-builder"
-                  className="inline-flex items-center gap-2 px-7 py-3.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-full text-sm font-bold shadow-lg shadow-red-600/25 hover:shadow-red-600/40 transition-all transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Khám Phá PC Builder</span>
-                </Link>
-
-                <Link
-                  to="/products"
-                  className="inline-flex items-center gap-2 px-6 py-3.5 bg-slate-100 text-slate-900 rounded-full text-sm font-semibold hover:bg-red-50 hover:text-red-600 transition-all border border-slate-200 hover:border-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                >
-                  <span>Xem Danh Mục Linh Kiện</span>
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
-              </div>
-            </div>
-
-            {/* Telemetry Spec Footnote */}
-            <div className="relative z-10 pt-6 mt-8 border-t border-slate-100 grid grid-cols-3 gap-2 sm:gap-4 text-slate-600">
-              <div>
-                <div className="text-base sm:text-lg font-bold text-slate-950 font-mono">Đồng bộ</div>
-                <div className="text-xs text-slate-500">Chuẩn form factor</div>
-              </div>
-              <div>
-                <div className="text-base sm:text-lg font-bold text-red-600 font-mono">Trực quan</div>
-                <div className="text-xs text-slate-500">Kiểm tra tương thích</div>
-              </div>
-              <div>
-                <div className="text-base sm:text-lg font-bold text-slate-950 font-mono">Tối ưu</div>
-                <div className="text-xs text-slate-500">Cân đối ngân sách &amp; TDP</div>
-              </div>
-            </div>
+        <div className="flex flex-col lg:flex-row gap-6 items-start relative">
+          {/* Left: Home Category Menu (Desktop ~256px, hover flyout panel) */}
+          <div className="w-full lg:w-64 flex-shrink-0">
+            <HomeCategoryMenu />
           </div>
 
-          {/* Right Visual Feature Column */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
-            {/* Flagship Hardware Preview Card */}
-            <div className="flex-1 bg-slate-900 rounded-3xl border border-red-100/40 relative overflow-hidden flex flex-col justify-between group min-h-[320px] p-6 shadow-sm">
+          {/* Right: Hero Banners */}
+          <div className="flex-1 min-w-0 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+            {/* Content Column */}
+            <div className="lg:col-span-7 bg-white p-6 sm:p-8 lg:p-10 rounded-3xl shadow-[0_12px_40px_rgba(220,38,38,0.06)] border border-red-100/70 flex flex-col justify-between relative overflow-hidden">
+              <div className="absolute -right-20 -top-20 w-72 h-72 bg-red-100/40 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -left-20 -bottom-20 w-72 h-72 bg-slate-100/60 rounded-full blur-3xl pointer-events-none" />
+
+              <div className="relative z-10">
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-red-50 border border-red-200/80 rounded-full mb-6 shadow-sm">
+                  <Flame className="w-4 h-4 text-red-600" />
+                  <span className="text-xs font-extrabold text-red-600 uppercase tracking-wider">
+                    Hệ Sinh Thái Phần Cứng PC
+                  </span>
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-950 tracking-tight mb-4 leading-tight">
+                  Kỷ nguyên hiệu năng PC: Khám phá{' '}
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-red-500 to-rose-700">
+                    Phần Cứng Đỉnh Cao
+                  </span>{' '}
+                  &amp; Tối Ưu Cấu Hình.
+                </h1>
+
+                <p className="text-sm sm:text-base text-slate-600 max-w-xl mb-6 leading-relaxed">
+                  Nền tảng thương mại điện tử linh kiện máy tính, hệ thống PC Gaming và máy trạm AI. Hỗ trợ người dùng từ cơ bản đến chuyên sâu dễ dàng lựa chọn linh kiện tương thích và cân bằng hiệu năng.
+                </p>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Link
+                    to="/pc-builder"
+                    className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-red-600/25 hover:shadow-red-600/40 transition-all transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>Khám Phá PC Builder</span>
+                  </Link>
+
+                  <Link
+                    to="/products"
+                    className="inline-flex items-center gap-2 px-5 py-3 bg-slate-100 text-slate-900 rounded-full text-xs sm:text-sm font-semibold hover:bg-red-50 hover:text-red-600 transition-all border border-slate-200 hover:border-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  >
+                    <span>Xem Danh Mục</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                </div>
+              </div>
+
+              {/* Telemetry Spec Footnote */}
+              <div className="relative z-10 pt-5 mt-6 border-t border-slate-100 grid grid-cols-3 gap-2 text-slate-600">
+                <div>
+                  <div className="text-sm sm:text-base font-bold text-slate-950 font-mono">Đồng bộ</div>
+                  <div className="text-[11px] text-slate-500">Chuẩn form factor</div>
+                </div>
+                <div>
+                  <div className="text-sm sm:text-base font-bold text-red-600 font-mono">Trực quan</div>
+                  <div className="text-[11px] text-slate-500">Kiểm tra tương thích</div>
+                </div>
+                <div>
+                  <div className="text-sm sm:text-base font-bold text-slate-950 font-mono">Tối ưu</div>
+                  <div className="text-[11px] text-slate-500">Cân đối ngân sách</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Visual Feature Column */}
+            <div className="lg:col-span-5 flex flex-col gap-4">
+              {/* Flagship Hardware Preview Card */}
+              <div className="flex-1 bg-slate-900 rounded-3xl border border-red-100/40 relative overflow-hidden flex flex-col justify-between group min-h-[280px] p-6 shadow-sm">
               <img
                 src={FEATURED_PRODUCTS_DATA[0].imageUrl}
                 alt="Flagship Hardware Preview"
@@ -143,6 +151,7 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
 
         {/* 3 Core Architecture Values */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">

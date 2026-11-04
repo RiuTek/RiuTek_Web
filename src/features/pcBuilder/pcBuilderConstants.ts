@@ -103,10 +103,17 @@ export function getSlotApplicableTechnicalFilters(
 ): Partial<PCBuilderTechnicalFilterState> {
   const result: Partial<PCBuilderTechnicalFilterState> = {}
 
+  if (filters.brands && filters.brands.length > 0) {
+    result.brands = filters.brands
+  }
+
   switch (activeSlot) {
     case ComponentType.CPU:
       if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.sockets && filters.sockets.length > 0) result.sockets = filters.sockets
       if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (filters.memoryTypes && filters.memoryTypes.length > 0) result.memoryTypes = filters.memoryTypes
+      if (filters.coreCounts && filters.coreCounts.length > 0) result.coreCounts = filters.coreCounts
       if (typeof filters.hasIntegratedGpu === 'boolean') {
         result.hasIntegratedGpu = filters.hasIntegratedGpu
       }
@@ -114,9 +121,14 @@ export function getSlotApplicableTechnicalFilters(
 
     case ComponentType.Motherboard:
       if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.sockets && filters.sockets.length > 0) result.sockets = filters.sockets
       if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (filters.memoryTypes && filters.memoryTypes.length > 0) result.memoryTypes = filters.memoryTypes
       if (filters.motherboardFormFactor !== undefined) {
         result.motherboardFormFactor = filters.motherboardFormFactor
+      }
+      if (filters.motherboardFormFactors && filters.motherboardFormFactors.length > 0) {
+        result.motherboardFormFactors = filters.motherboardFormFactors
       }
       if (typeof filters.hasWifi === 'boolean') {
         result.hasWifi = filters.hasWifi
@@ -124,6 +136,8 @@ export function getSlotApplicableTechnicalFilters(
       break
 
     case ComponentType.GPU:
+      if (filters.vramGbs && filters.vramGbs.length > 0) result.vramGbs = filters.vramGbs
+      if (filters.gpuLengthsMm && filters.gpuLengthsMm.length > 0) result.gpuLengthsMm = filters.gpuLengthsMm
       if (typeof filters.requires12VHPWR === 'boolean') {
         result.requires12VHPWR = filters.requires12VHPWR
       }
@@ -131,7 +145,11 @@ export function getSlotApplicableTechnicalFilters(
 
     case ComponentType.RAM:
       if (filters.memoryType !== undefined) result.memoryType = filters.memoryType
+      if (filters.memoryTypes && filters.memoryTypes.length > 0) result.memoryTypes = filters.memoryTypes
       if (filters.ramFormFactor !== undefined) result.ramFormFactor = filters.ramFormFactor
+      if (filters.ramFormFactors && filters.ramFormFactors.length > 0) result.ramFormFactors = filters.ramFormFactors
+      if (filters.ramCapacitiesGb && filters.ramCapacitiesGb.length > 0) result.ramCapacitiesGb = filters.ramCapacitiesGb
+      if (filters.ramSpeedsMhz && filters.ramSpeedsMhz.length > 0) result.ramSpeedsMhz = filters.ramSpeedsMhz
       if (typeof filters.hasRgb === 'boolean') {
         result.hasRgb = filters.hasRgb
       }
@@ -139,15 +157,26 @@ export function getSlotApplicableTechnicalFilters(
 
     case ComponentType.Storage:
       if (filters.storageType !== undefined) result.storageType = filters.storageType
+      if (filters.storageTypes && filters.storageTypes.length > 0) result.storageTypes = filters.storageTypes
       if (filters.storageInterface !== undefined) {
         result.storageInterface = filters.storageInterface
+      }
+      if (filters.storageInterfaces && filters.storageInterfaces.length > 0) {
+        result.storageInterfaces = filters.storageInterfaces
+      }
+      if (filters.storageCapacitiesGb && filters.storageCapacitiesGb.length > 0) {
+        result.storageCapacitiesGb = filters.storageCapacitiesGb
       }
       break
 
     case ComponentType.PSU:
       if (filters.psuEfficiency !== undefined) result.psuEfficiency = filters.psuEfficiency
+      if (filters.psuEfficiencies && filters.psuEfficiencies.length > 0) result.psuEfficiencies = filters.psuEfficiencies
       if (filters.psuModularity !== undefined) result.psuModularity = filters.psuModularity
+      if (filters.psuModularities && filters.psuModularities.length > 0) result.psuModularities = filters.psuModularities
       if (filters.psuFormFactor !== undefined) result.psuFormFactor = filters.psuFormFactor
+      if (filters.psuFormFactors && filters.psuFormFactors.length > 0) result.psuFormFactors = filters.psuFormFactors
+      if (filters.psuWattages && filters.psuWattages.length > 0) result.psuWattages = filters.psuWattages
       if (typeof filters.has12VHPWR === 'boolean') {
         result.has12VHPWR = filters.has12VHPWR
       }
@@ -157,11 +186,16 @@ export function getSlotApplicableTechnicalFilters(
       if (filters.motherboardFormFactor !== undefined) {
         result.motherboardFormFactor = filters.motherboardFormFactor
       }
+      if (filters.motherboardFormFactors && filters.motherboardFormFactors.length > 0) {
+        result.motherboardFormFactors = filters.motherboardFormFactors
+      }
       break
 
     case ComponentType.Cooler:
       if (filters.socket !== undefined) result.socket = filters.socket
+      if (filters.sockets && filters.sockets.length > 0) result.sockets = filters.sockets
       if (filters.coolerType !== undefined) result.coolerType = filters.coolerType
+      if (filters.coolerTypes && filters.coolerTypes.length > 0) result.coolerTypes = filters.coolerTypes
       if (typeof filters.hasRgb === 'boolean') {
         result.hasRgb = filters.hasRgb
       }

@@ -3,151 +3,71 @@ import { useSearchParams } from 'react-router-dom'
 import { ApiError, type PagedResult } from '../../lib/api'
 import { getCategories, getProducts } from './productApi'
 import {
-  DEFAULT_PAGE_INDEX,
-  DEFAULT_PAGE_SIZE,
-  DEFAULT_SORT_BY,
-} from './productConstants'
-import {
-  ComponentType,
-  ProductSortOption,
-  type Category,
-  type ProductFilterParams,
-  type ProductSummary,
+  parseFiltersFromUrl,
+  computeCanonicalQueryKey,
+  inferComponentTypeFromCategory,
+  filterApplicableTechnicalFilters,
+  buildProductFilterSearchParams,
+  ProductFilterOptionsCoordinator,
+  type ParsedProductCatalogFilters,
+  MAX_FILTER_VALUES_PER_GROUP,
+} from './productFilterHelper'
+import type {
+  Category,
+  ProductFilterOptionsResponse,
+  ProductFilterParams,
+  ProductSummary,
 } from './productTypes'
 
-export interface ParsedFilters {
-  pageIndex: number
-  pageSize: number
-  searchTerm: string
-  categoryId: string
-  componentType: ComponentType | undefined
-  brand: string
-  minPrice: number | undefined
-  maxPrice: number | undefined
-  inStock: boolean | undefined
-  isActive: boolean | undefined
-  sortBy: ProductSortOption
-}
+export type ParsedFilters = ParsedProductCatalogFilters
 
-const GUID_REGEX =
-  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
-
-function parseStrictInt(raw: string | null): number | undefined {
-  if (raw === null || raw === undefined) return undefined
-  const trimmed = raw.trim()
-  if (trimmed === '' || !/^-?\d+$/.test(trimmed)) return undefined
-  const num = Number(trimmed)
-  if (!Number.isSafeInteger(num)) return undefined
-  return num
-}
-
-function parseStrictFloat(raw: string | null): number | undefined {
-  if (raw === null || raw === undefined) return undefined
-  const trimmed = raw.trim()
-  if (trimmed === '' || !/^(?:\d+(?:\.\d+)?|\.\d+)$/.test(trimmed)) return undefined
-  const num = Number(trimmed)
-  if (!Number.isFinite(num) || num < 0) return undefined
-  return num
-}
-
-function parseStrictGuid(raw: string | null): string {
-  if (raw === null || raw === undefined) return ''
-  const trimmed = raw.trim()
-  return GUID_REGEX.test(trimmed) ? trimmed : ''
-}
-
-function parseFiltersFromSearchParams(searchParams: URLSearchParams): {
-  filters: ParsedFilters
-  priceError: string | null
-} {
-  const pageIndexParsed = parseStrictInt(searchParams.get('pageIndex'))
-  const pageIndex =
-    pageIndexParsed !== undefined && pageIndexParsed >= 1 && pageIndexParsed <= 2147483647
-      ? pageIndexParsed
-      : DEFAULT_PAGE_INDEX
-
-  const pageSizeParsed = parseStrictInt(searchParams.get('pageSize'))
-  const pageSize =
-    pageSizeParsed !== undefined && pageSizeParsed >= 1 && pageSizeParsed <= 50
-      ? pageSizeParsed
-      : DEFAULT_PAGE_SIZE
-
-  const sortByParsed = parseStrictInt(searchParams.get('sortBy'))
-  const sortBy =
-    sortByParsed !== undefined && sortByParsed >= 1 && sortByParsed <= 5
-      ? (sortByParsed as ProductSortOption)
-      : DEFAULT_SORT_BY
-
-  const componentTypeParsed = parseStrictInt(searchParams.get('componentType'))
-  const componentType =
-    componentTypeParsed !== undefined && componentTypeParsed >= 1 && componentTypeParsed <= 9
-      ? (componentTypeParsed as ComponentType)
-      : undefined
-
-  const searchTerm = (searchParams.get('searchTerm') ?? '').trim().slice(0, 100)
-  const categoryId = parseStrictGuid(searchParams.get('categoryId'))
-  const brand = (searchParams.get('brand') ?? '').trim().slice(0, 100)
-
-  const minPrice = parseStrictFloat(searchParams.get('minPrice'))
-  const maxPrice = parseStrictFloat(searchParams.get('maxPrice'))
-
-  let priceError: string | null = null
-  if (minPrice !== undefined && maxPrice !== undefined && maxPrice < minPrice) {
-    priceError = 'Giá tối đa phải lớn hơn hoặc bằng giá tối thiểu.'
-  }
-
-  let inStock: boolean | undefined
-  const inStockRaw = searchParams.get('inStock')
-  if (inStockRaw === 'true') inStock = true
-  else if (inStockRaw === 'false') inStock = false
-
-  let isActive: boolean | undefined
-  const isActiveRaw = searchParams.get('isActive')
-  if (isActiveRaw === 'true') isActive = true
-  else if (isActiveRaw === 'false') isActive = false
-
-  return {
-    filters: {
-      pageIndex,
-      pageSize,
-      searchTerm,
-      categoryId,
-      componentType,
-      brand,
-      minPrice,
-      maxPrice,
-      inStock,
-      isActive,
-      sortBy,
-    },
-    priceError,
-  }
-}
+// Singleton coordinator cho phép lưu cache trong phiên render của client
+const optionsCoordinator = new ProductFilterOptionsCoordinator()
 
 export function useProductCatalog() {
   const [searchParams, setSearchParams] = useSearchParams()
 
+  // 1. Categories state
   const [categories, setCategories] = useState<Category[]>([])
   const [isCategoriesLoading, setIsCategoriesLoading] = useState(true)
   const [categoriesError, setCategoriesError] = useState<ApiError | Error | null>(null)
 
+  // 2. Parse URL parameters với strict validation
+  const { filters, priceError, overflowError } = useMemo(
+    () => parseFiltersFromUrl(searchParams),
+    [searchParams]
+  )
+
+  // 3. Suy luận componentType từ categoryId nếu URL không có componentType
+  const effectiveComponentType = useMemo(() => {
+    if (filters.componentType) return filters.componentType
+    if (filters.categoryId && categories.length > 0) {
+      return inferComponentTypeFromCategory(categories, filters.categoryId)
+    }
+    return undefined
+  }, [filters.componentType, filters.categoryId, categories])
+
+  // 4. Products query state
   const [pagedResult, setPagedResult] = useState<PagedResult<ProductSummary> | null>(null)
   const [error, setError] = useState<ApiError | Error | null>(null)
   const [completedQueryKey, setCompletedQueryKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
-  const { filters, priceError } = useMemo(
-    () => parseFiltersFromSearchParams(searchParams),
-    [searchParams]
-  )
-
+  // Canonical query key để theo dõi sự thay đổi của filters
   const queryKey = useMemo(() => {
-    return JSON.stringify({ filters, retryTrigger })
+    return `${computeCanonicalQueryKey(filters)}:retry=${retryTrigger}`
   }, [filters, retryTrigger])
 
-  const isLoading = !priceError && completedQueryKey !== queryKey
+  const isLoading = !priceError && !overflowError && completedQueryKey !== queryKey
 
-  // 1. Fetch Categories once on mount
+  // 5. Metadata filter options state
+  const [filterOptions, setFilterOptions] = useState<ProductFilterOptionsResponse | null>(null)
+  const [isFilterOptionsLoading, setIsFilterOptionsLoading] = useState(false)
+  const [filterOptionsError, setFilterOptionsError] = useState<Error | null>(null)
+  const [optionsRetryTrigger, setOptionsRetryTrigger] = useState(0)
+  const [limitWarning, setLimitWarning] = useState<string | null>(null)
+
+  // 6. Fetch Categories một lần lúc mount
   useEffect(() => {
     let isMounted = true
     const controller = new AbortController()
@@ -174,11 +94,53 @@ export function useProductCatalog() {
     }
   }, [])
 
-  // 2. Fetch Products whenever filters or retryTrigger change
+  // 7. Load Metadata Options theo 4 scope params (có sequence & scope guard)
+  useEffect(() => {
+    const scopeParams = {
+      componentType: effectiveComponentType,
+      categoryId: filters.categoryId || undefined,
+      isActive: filters.isActive,
+      inStock: filters.inStock,
+    }
+
+    let isMounted = true
+
+    optionsCoordinator.loadOptions(
+      scopeParams,
+      (data) => {
+        if (isMounted) {
+          setFilterOptions(data)
+          setFilterOptionsError(null)
+        }
+      },
+      (err) => {
+        if (isMounted) {
+          setFilterOptionsError(err)
+        }
+      },
+      (loading) => {
+        if (isMounted) {
+          setIsFilterOptionsLoading(loading)
+        }
+      }
+    )
+
+    return () => {
+      isMounted = false
+    }
+  }, [
+    effectiveComponentType,
+    filters.categoryId,
+    filters.isActive,
+    filters.inStock,
+    optionsRetryTrigger,
+  ])
+
+  // 8. Fetch Products khi filters thay đổi (có abort controller)
   const activeAbortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (priceError) {
+    if (priceError || overflowError) {
       return
     }
 
@@ -189,21 +151,13 @@ export function useProductCatalog() {
     const controller = new AbortController()
     activeAbortControllerRef.current = controller
 
-    const queryFilters: ProductFilterParams = {
-      pageIndex: filters.pageIndex,
-      pageSize: filters.pageSize,
-      searchTerm: filters.searchTerm || undefined,
-      categoryId: filters.categoryId || undefined,
-      componentType: filters.componentType,
-      brand: filters.brand || undefined,
-      minPrice: filters.minPrice,
-      maxPrice: filters.maxPrice,
-      inStock: filters.inStock,
-      isActive: filters.isActive,
-      sortBy: filters.sortBy,
-    }
+    // Làm sạch technical filters không áp dụng cho componentType hiện tại
+    const applicableFilters = filterApplicableTechnicalFilters(
+      filters,
+      effectiveComponentType
+    )
 
-    getProducts(queryFilters, controller.signal)
+    getProducts(applicableFilters, controller.signal)
       .then((data) => {
         setPagedResult(data)
         setError(null)
@@ -220,35 +174,95 @@ export function useProductCatalog() {
     return () => {
       controller.abort()
     }
-  }, [queryKey, priceError, filters])
+  }, [queryKey, priceError, overflowError, filters, effectiveComponentType])
 
-  // Helper to update search params
+  // Clear limit warning sau 3 giây
+  useEffect(() => {
+    if (!limitWarning) return
+    const timer = setTimeout(() => {
+      setLimitWarning(null)
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [limitWarning])
+
+  // 9. URL Navigation Helpers
   const updateFilters = useCallback(
-    (newParams: Partial<Record<keyof ParsedFilters, string | number | boolean | undefined | null>>, resetPage = true) => {
+    (newParams: Partial<ProductFilterParams>, resetPage = true) => {
       setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
+        const currentParsed = parseFiltersFromUrl(prev).filters
+        const merged: ProductFilterParams = {
+          ...currentParsed,
+          ...newParams,
+        }
 
-        for (const [key, value] of Object.entries(newParams)) {
-          if (value === undefined || value === null || value === '') {
-            next.delete(key)
-          } else {
-            next.set(key, String(value))
+        // Nếu thay đổi componentType, làm sạch category nếu không khớp và xóa technical filters cũ
+        if (newParams.componentType !== undefined && newParams.componentType !== currentParsed.componentType) {
+          if (merged.categoryId && categories.length > 0) {
+            const catType = inferComponentTypeFromCategory(categories, merged.categoryId)
+            if (catType !== undefined && catType !== newParams.componentType) {
+              merged.categoryId = undefined
+            }
           }
+          const cleaned = filterApplicableTechnicalFilters(merged, newParams.componentType)
+          Object.assign(merged, cleaned)
         }
 
         if (resetPage) {
-          next.delete('pageIndex')
+          merged.pageIndex = 1
         }
 
-        // Clean up default sortBy and pageSize to keep URL clean
-        if (next.get('sortBy') === String(DEFAULT_SORT_BY)) {
-          next.delete('sortBy')
-        }
-        if (next.get('pageSize') === String(DEFAULT_PAGE_SIZE)) {
-          next.delete('pageSize')
+        return buildProductFilterSearchParams(merged)
+      })
+    },
+    [setSearchParams, categories]
+  )
+
+  const toggleFilterChoice = useCallback(
+    (groupKey: string, value: string | number) => {
+      setSearchParams((prev) => {
+        const currentParsed = parseFiltersFromUrl(prev).filters
+        const currentArray = (currentParsed[groupKey as keyof ParsedProductCatalogFilters] as (string | number)[]) ?? []
+        const valueKey = typeof value === 'number' ? value : String(value).toLowerCase()
+
+        const isCurrentlyChecked = currentArray.some((item) =>
+          typeof item === 'number' ? item === value : item.toLowerCase() === valueKey
+        )
+
+        let nextArray: (string | number)[]
+        if (isCurrentlyChecked) {
+          nextArray = currentArray.filter((item) =>
+            typeof item === 'number' ? item !== value : item.toLowerCase() !== valueKey
+          )
+        } else {
+          if (currentArray.length >= MAX_FILTER_VALUES_PER_GROUP) {
+            setLimitWarning(`Mỗi nhóm chỉ được chọn tối đa ${MAX_FILTER_VALUES_PER_GROUP} giá trị.`)
+            return prev
+          }
+          nextArray = [...currentArray, value]
         }
 
-        return next
+        const merged: ProductFilterParams = {
+          ...currentParsed,
+          [groupKey]: nextArray,
+          pageIndex: 1,
+        }
+
+        return buildProductFilterSearchParams(merged)
+      })
+    },
+    [setSearchParams]
+  )
+
+  const clearFilterGroup = useCallback(
+    (groupKey: string) => {
+      setSearchParams((prev) => {
+        const currentParsed = parseFiltersFromUrl(prev).filters
+        const merged: ProductFilterParams = {
+          ...currentParsed,
+          [groupKey]: [],
+          pageIndex: 1,
+        }
+        return buildProductFilterSearchParams(merged)
       })
     },
     [setSearchParams]
@@ -257,13 +271,12 @@ export function useProductCatalog() {
   const setPage = useCallback(
     (page: number) => {
       setSearchParams((prev) => {
-        const next = new URLSearchParams(prev)
-        if (page <= 1) {
-          next.delete('pageIndex')
-        } else {
-          next.set('pageIndex', String(page))
+        const currentParsed = parseFiltersFromUrl(prev).filters
+        const merged: ProductFilterParams = {
+          ...currentParsed,
+          pageIndex: page,
         }
-        return next
+        return buildProductFilterSearchParams(merged)
       })
     },
     [setSearchParams]
@@ -277,6 +290,10 @@ export function useProductCatalog() {
     setRetryTrigger((prev) => prev + 1)
   }, [])
 
+  const retryFilterOptions = useCallback(() => {
+    setOptionsRetryTrigger((prev) => prev + 1)
+  }, [])
+
   return {
     products: pagedResult?.items ?? [],
     pagedResult,
@@ -286,10 +303,19 @@ export function useProductCatalog() {
     isLoading,
     error,
     priceError,
+    overflowError,
+    limitWarning,
     filters,
+    effectiveComponentType,
+    filterOptions,
+    isFilterOptionsLoading,
+    filterOptionsError,
     updateFilters,
+    toggleFilterChoice,
+    clearFilterGroup,
     setPage,
     resetFilters,
     retry,
+    retryFilterOptions,
   }
 }

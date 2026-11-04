@@ -36,10 +36,13 @@ export interface PagedResult<T> {
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD'
 
+export type QueryParamScalar = string | number | boolean | undefined | null
+export type QueryParamValue = QueryParamScalar | QueryParamScalar[]
+
 export interface RequestOptions extends Omit<RequestInit, 'method' | 'body'> {
   method?: HttpMethod
   headers?: HeadersInit
-  params?: Record<string, string | number | boolean | undefined | null>
+  params?: Record<string, QueryParamValue>
   body?: unknown
   token?: string
   signal?: AbortSignal

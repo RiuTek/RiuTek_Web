@@ -4,6 +4,7 @@ import { ProductSortOption } from '../features/products/productTypes'
 import { useProductCatalog } from '../features/products/useProductCatalog'
 import { ProductCard } from '../features/products/components/ProductCard'
 import { ProductFilters } from '../features/products/components/ProductFilters'
+import { ProductActiveFilterChips } from '../features/products/components/ProductActiveFilterChips'
 import { ProductPagination } from '../features/products/components/ProductPagination'
 import {
   ProductGridEmpty,
@@ -21,22 +22,63 @@ export const ProductsPage: React.FC = () => {
     isLoading,
     error,
     priceError,
+    overflowError,
+    limitWarning,
     filters,
+    effectiveComponentType,
+    filterOptions,
+    isFilterOptionsLoading,
+    filterOptionsError,
     updateFilters,
+    toggleFilterChoice,
+    clearFilterGroup,
     setPage,
     resetFilters,
     retry,
+    retryFilterOptions,
   } = useProductCatalog()
+
+  const handleRemoveFilterChip = (key: string, value?: string | number) => {
+    if (value !== undefined) {
+      toggleFilterChoice(key, value)
+    } else if (key === 'price') {
+      updateFilters({ minPrice: undefined, maxPrice: undefined })
+    } else {
+      updateFilters({ [key]: undefined })
+    }
+  }
 
   const hasActiveFilters = Boolean(
     filters.searchTerm ||
       filters.categoryId ||
       filters.componentType !== undefined ||
-      filters.brand ||
+      filters.brands.length > 0 ||
       filters.minPrice !== undefined ||
       filters.maxPrice !== undefined ||
       filters.inStock !== undefined ||
-      filters.isActive !== undefined
+      filters.isActive !== undefined ||
+      filters.sockets.length > 0 ||
+      filters.memoryTypes.length > 0 ||
+      filters.motherboardFormFactors.length > 0 ||
+      filters.ramFormFactors.length > 0 ||
+      filters.storageTypes.length > 0 ||
+      filters.storageInterfaces.length > 0 ||
+      filters.psuEfficiencies.length > 0 ||
+      filters.psuModularities.length > 0 ||
+      filters.psuFormFactors.length > 0 ||
+      filters.coolerTypes.length > 0 ||
+      filters.coreCounts.length > 0 ||
+      filters.vramGbs.length > 0 ||
+      filters.gpuLengthsMm.length > 0 ||
+      filters.ramCapacitiesGb.length > 0 ||
+      filters.ramSpeedsMhz.length > 0 ||
+      filters.storageCapacitiesGb.length > 0 ||
+      filters.psuWattages.length > 0 ||
+      typeof filters.hasIntegratedGpu === 'boolean' ||
+      typeof filters.hasWifi === 'boolean' ||
+      typeof filters.hasRgb === 'boolean' ||
+      typeof filters.has12VHPWR === 'boolean' ||
+      typeof filters.requires12VHPWR === 'boolean'
   )
 
   return (
@@ -56,16 +98,34 @@ export const ProductsPage: React.FC = () => {
         {/* Filters Sidebar */}
         <ProductFilters
           filters={filters}
+          effectiveComponentType={effectiveComponentType}
           categories={categories}
           isCategoriesLoading={isCategoriesLoading}
           categoriesError={categoriesError}
           priceError={priceError}
+          overflowError={overflowError}
+          limitWarning={limitWarning}
+          filterOptions={filterOptions}
+          isFilterOptionsLoading={isFilterOptionsLoading}
+          filterOptionsError={filterOptionsError}
           onUpdateFilters={updateFilters}
+          onToggleChoice={toggleFilterChoice}
+          onClearGroup={clearFilterGroup}
           onResetFilters={resetFilters}
+          onRetryFilterOptions={retryFilterOptions}
         />
 
         {/* Catalog Main Viewport */}
         <section aria-label="Danh sách sản phẩm" className="flex-1 w-full">
+          {/* Active Filter Chips */}
+          <ProductActiveFilterChips
+            filters={filters}
+            effectiveComponentType={effectiveComponentType}
+            categories={categories}
+            onRemoveFilter={handleRemoveFilterChip}
+            onClearAll={resetFilters}
+          />
+
           {/* Top Results Bar */}
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
             <div className="text-xs text-slate-600 font-medium">

@@ -22,9 +22,11 @@ import {
 import {
   ComponentType,
   ProductSortOption,
+  type ProductFilterOptionsResponse,
   type ProductFilterParams,
   type ProductSummary,
 } from '../../products/productTypes'
+import { ProductFilterOptionsCoordinator } from '../../products/productFilterHelper'
 import {
   isSingleChoiceComponent,
   MAX_MULTI_CHOICE_QUANTITY,
@@ -103,6 +105,13 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   const [completedKey, setCompletedKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
+  // Filter options metadata state
+  const [filterOptions, setFilterOptions] = useState<ProductFilterOptionsResponse | null>(null)
+  const [isOptionsLoading, setIsOptionsLoading] = useState(false)
+  const [optionsError, setOptionsError] = useState<Error | null>(null)
+  const [optionsRetryTrigger, setOptionsRetryTrigger] = useState(0)
+  const optionsCoordinatorRef = useRef(new ProductFilterOptionsCoordinator())
+
   // Mobile filter collapse toggle
   const [showMobileFilters, setShowMobileFilters] = useState(false)
 
@@ -163,6 +172,73 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
     key: K,
     value: PCBuilderTechnicalFilterState[K]
   ) => {
+    setTechnicalFilters((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
+    setPageIndex(1)
+  }
+
+  // Load Filter Options cho activeSlot
+  useEffect(() => {
+    let isMounted = true
+    const coordinator = optionsCoordinatorRef.current
+    const scope = {
+      componentType: activeSlot,
+      inStock: inStockFilter === 'true' ? true : inStockFilter === 'false' ? false : undefined,
+      isActive: isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
+    }
+
+    coordinator.loadOptions(
+      scope,
+      (data) => {
+        if (isMounted) {
+          setFilterOptions(data)
+          setOptionsError(null)
+        }
+      },
+      (err) => {
+        if (isMounted) setOptionsError(err)
+      },
+      (loading) => {
+        if (isMounted) setIsOptionsLoading(loading)
+      }
+    )
+
+    return () => {
+      isMounted = false
+    }
+  }, [activeSlot, inStockFilter, isActiveFilter, optionsRetryTrigger])
+
+  const handleToggleTechnicalChoice = (key: string, value: string | number) => {
+    setTechnicalFilters((prev) => {
+      const current = (prev[key as keyof PCBuilderTechnicalFilterState] as (string | number)[]) ?? []
+      const exists = current.some((item) =>
+        typeof item === 'number' ? item === value : String(item).toLowerCase() === String(value).toLowerCase()
+      )
+      const next = exists
+        ? current.filter((item) =>
+            typeof item === 'number' ? item !== value : String(item).toLowerCase() !== String(value).toLowerCase()
+          )
+        : [...current, value]
+
+      return {
+        ...prev,
+        [key]: next,
+      }
+    })
+    setPageIndex(1)
+  }
+
+  const handleClearTechnicalGroup = (key: string) => {
+    setTechnicalFilters((prev) => ({
+      ...prev,
+      [key]: [],
+    }))
+    setPageIndex(1)
+  }
+
+  const handleChangeBooleanFilter = (key: string, value: boolean | undefined) => {
     setTechnicalFilters((prev) => ({
       ...prev,
       [key]: value,
@@ -540,6 +616,13 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
             <PCBuilderTechnicalFilters
               activeSlot={activeSlot}
               technicalFilters={technicalFilters}
+              filterOptions={filterOptions}
+              isOptionsLoading={isOptionsLoading}
+              optionsError={optionsError}
+              onToggleChoice={handleToggleTechnicalChoice}
+              onClearGroup={handleClearTechnicalGroup}
+              onChangeBoolean={handleChangeBooleanFilter}
+              onRetryOptions={() => setOptionsRetryTrigger((prev) => prev + 1)}
               onChange={handleTechnicalFilterChange}
             />
           </div>

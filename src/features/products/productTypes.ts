@@ -58,6 +58,22 @@ export interface Category {
 }
 
 /**
+ * Metadata nhóm lựa chọn kỹ thuật trả về từ GET /products/filter-options
+ */
+export interface ProductFilterOptionGroup {
+  key: string
+  values: number[]
+}
+
+/**
+ * Metadata bộ lọc khả dụng từ GET /products/filter-options
+ */
+export interface ProductFilterOptionsResponse {
+  brands: string[]
+  groups: ProductFilterOptionGroup[]
+}
+
+/**
  * Tham số lọc và phân trang gửi lên Backend
  */
 export interface ProductFilterParams {
@@ -67,21 +83,45 @@ export interface ProductFilterParams {
   categoryId?: string
   componentType?: ComponentType
   brand?: string
+  brands?: string[]
   minPrice?: number
   maxPrice?: number
   inStock?: boolean
   isActive?: boolean
   sortBy?: ProductSortOption
+
+  // 15 Technical Filters (hỗ trợ cả legacy scalar lẫn repeated list plural)
   socket?: CpuSocket
+  sockets?: CpuSocket[]
   memoryType?: RamType
+  memoryTypes?: RamType[]
   motherboardFormFactor?: MotherboardFormFactor
+  motherboardFormFactors?: MotherboardFormFactor[]
   ramFormFactor?: RamFormFactor
+  ramFormFactors?: RamFormFactor[]
   storageType?: StorageType
+  storageTypes?: StorageType[]
   storageInterface?: StorageInterface
+  storageInterfaces?: StorageInterface[]
   psuEfficiency?: PsuEfficiency
+  psuEfficiencies?: PsuEfficiency[]
   psuModularity?: PsuModularity
+  psuModularities?: PsuModularity[]
   psuFormFactor?: PsuFormFactor
+  psuFormFactors?: PsuFormFactor[]
   coolerType?: CoolerType
+  coolerTypes?: CoolerType[]
+
+  // Numeric lists
+  coreCounts?: number[]
+  vramGbs?: number[]
+  gpuLengthsMm?: number[]
+  ramCapacitiesGb?: number[]
+  ramSpeedsMhz?: number[]
+  storageCapacitiesGb?: number[]
+  psuWattages?: number[]
+
+  // Booleans
   hasIntegratedGpu?: boolean
   hasWifi?: boolean
   hasRgb?: boolean
