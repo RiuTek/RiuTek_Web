@@ -25,6 +25,12 @@ export interface PCBuildExportImageButtonProps {
   contextKey?: string
 }
 
+interface ActiveExportOperation {
+  id: number
+  controller: AbortController
+  contextKey?: string
+}
+
 export const PCBuildExportImageButton: React.FC<PCBuildExportImageButtonProps> = ({
   onGetSnapshot,
   disabled = false,
@@ -36,18 +42,18 @@ export const PCBuildExportImageButton: React.FC<PCBuildExportImageButtonProps> =
 }) => {
   const [isExporting, setIsExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
-  const [prevContextKey, setPrevContextKey] = useState(contextKey)
+  const [activeContextKey, setActiveContextKey] = useState(contextKey)
 
   // Điều chỉnh state khi contextKey thay đổi mà không gây cascading render trong effect
-  if (prevContextKey !== contextKey) {
-    setPrevContextKey(contextKey)
+  if (contextKey !== activeContextKey) {
+    setActiveContextKey(contextKey)
     setIsExporting(false)
     setExportError(null)
   }
 
-  // Khóa chống double-click đồng bộ
-  const isExecutingRef = useRef(false)
-  const abortControllerRef = useRef<AbortController | null>(null)
+  // Ref quản lý operation đang chạy độc quyền
+  const activeOperationRef = useRef<ActiveExportOperation | null>(null)
+  const operationSeqRef = useRef(0)
   const isMountedRef = useRef(true)
 
   // Quản lý lifecycle unmount và hủy operation cũ
@@ -55,71 +61,101 @@ export const PCBuildExportImageButton: React.FC<PCBuildExportImageButtonProps> =
     isMountedRef.current = true
     return () => {
       isMountedRef.current = false
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort()
-        abortControllerRef.current = null
+      if (activeOperationRef.current) {
+        activeOperationRef.current.controller.abort()
+        activeOperationRef.current = null
       }
-      isExecutingRef.current = false
     }
   }, [])
 
   // Khi contextKey thay đổi (người dùng đổi cấu hình hoặc chuyển trang), hủy bỏ tác vụ cũ
   useEffect(() => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
+    if (activeOperationRef.current) {
+      activeOperationRef.current.controller.abort()
+      activeOperationRef.current = null
     }
-    isExecutingRef.current = false
   }, [contextKey])
 
   const handleExport = useCallback(async () => {
-    // 1. Kiểm tra khóa chống spam / double-click
-    if (disabled || isExecutingRef.current) {
+    // 1. Kiểm tra disabled
+    if (disabled) {
       return
+    }
+
+    // 2. Double-click guard trong cùng context
+    if (
+      activeOperationRef.current &&
+      activeOperationRef.current.contextKey === contextKey
+    ) {
+      return
+    }
+
+    // Nếu có operation cũ từ context trước còn sót lại, hủy ngay lập tức
+    if (activeOperationRef.current) {
+      activeOperationRef.current.controller.abort()
+      activeOperationRef.current = null
     }
 
     setExportError(null)
 
-    // 2. Chụp snapshot tại thời điểm nhấn nút
+    // 3. Chụp snapshot tại thời điểm nhấn nút
     const snapshot = onGetSnapshot()
     if (!snapshot) {
       return
     }
 
-    isExecutingRef.current = true
+    // 4. Khởi tạo identity operation mới độc quyền
+    const operationId = ++operationSeqRef.current
+    const controller = new AbortController()
+    const operation: ActiveExportOperation = {
+      id: operationId,
+      controller,
+      contextKey,
+    }
+
+    activeOperationRef.current = operation
     setIsExporting(true)
 
-    const controller = new AbortController()
-    abortControllerRef.current = controller
-
     try {
-      // 3. Render Canvas và chuyển thành Blob PNG
+      // 5. Render Canvas và chuyển thành Blob PNG
       const blob = await exportPCBuildToPngBlob(snapshot, controller.signal)
 
-      if (controller.signal.aborted || !isMountedRef.current) {
+      // Kiểm tra tính sở hữu trước khi tải file:
+      // Phải còn mounted, signal chưa bị abort, và operation này vẫn là active
+      if (
+        !isMountedRef.current ||
+        controller.signal.aborted ||
+        activeOperationRef.current !== operation
+      ) {
         return
       }
 
-      // 4. Kích hoạt tải file
+      // 6. Kích hoạt tải file
       const filename = generateExportFilename(snapshot.buildName, snapshot.exportedAt)
       downloadBlob(blob, filename)
     } catch (err: unknown) {
-      if (controller.signal.aborted || !isMountedRef.current) {
+      // Catch: chỉ hiển thị lỗi nếu operation này vẫn là active và không bị abort
+      if (
+        !isMountedRef.current ||
+        controller.signal.aborted ||
+        activeOperationRef.current !== operation
+      ) {
         return
       }
+
       const message =
         err instanceof Error ? err.message : 'Không thể xuất ảnh cấu hình lúc này.'
       setExportError(message)
     } finally {
-      if (abortControllerRef.current === controller) {
-        abortControllerRef.current = null
-      }
-      isExecutingRef.current = false
-      if (isMountedRef.current) {
-        setIsExporting(false)
+      // Finally: chỉ giải phóng lock và reset isExporting nếu operation này vẫn sở hữu slot active
+      if (activeOperationRef.current === operation) {
+        activeOperationRef.current = null
+        if (isMountedRef.current) {
+          setIsExporting(false)
+        }
       }
     }
-  }, [disabled, onGetSnapshot])
+  }, [contextKey, disabled, onGetSnapshot])
 
   // Style theo variant
   let variantClasses: string

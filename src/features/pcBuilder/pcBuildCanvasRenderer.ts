@@ -6,12 +6,48 @@ import type { PCBuildExportItem, PCBuildExportSnapshot } from './pcBuildExportTy
 const CANVAS_WIDTH = 1200
 const MAX_CANVAS_HEIGHT = 12000
 const PADDING_X = 50
+const CONTENT_WIDTH = CANVAS_WIDTH - PADDING_X * 2 // 1100px
+
+// Định nghĩa thông số layout bảng linh kiện (Tổng 1100px)
+// Col 0: Nhóm linh kiện [50, 230], rộng 180, vùng chữ 150
+// Col 1: Tên & SKU [230, 740], rộng 510, vùng chữ 480
+// Col 2: Số lượng [740, 810], rộng 70, căn giữa 775
+// Col 3: Đơn giá [810, 960], rộng 150, căn phải 950
+// Col 4: Thành tiền [960, 1150], rộng 190, căn phải 1135
+const COL_GROUP_X = PADDING_X + 15 // 65
+const COL_GROUP_TEXT_WIDTH = 150
+
+const COL_NAME_X = PADDING_X + 180 + 15 // 245
+const COL_NAME_TEXT_WIDTH = 480
+
+const COL_QTY_CENTER_X = PADDING_X + 180 + 510 + 35 // 775
+
+const COL_UNIT_PRICE_RIGHT_X = PADDING_X + 180 + 510 + 70 + 150 - 10 // 950
+
+const COL_TOTAL_RIGHT_X = CANVAS_WIDTH - PADDING_X - 15 // 1135
+
+// Font chữ dùng thống nhất giữa đo lường (measure) và vẽ (draw)
+const FONT_TABLE_HEADER = 'bold 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+const FONT_TABLE_GROUP = 'bold 12px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+const FONT_TABLE_NAME = 'bold 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+const FONT_TABLE_SKU = '500 11px monospace'
+const FONT_TABLE_QTY = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+const FONT_TABLE_UNIT_PRICE = '500 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+const FONT_TABLE_TOTAL = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+
+// Khoảng cách dòng và đệm hàng
+const ROW_PADDING_TOP = 12
+const ROW_PADDING_BOTTOM = 12
+const LINE_HEIGHT_GROUP = 18
+const LINE_HEIGHT_NAME = 20
+const LINE_HEIGHT_SKU = 16
+const GAP_NAME_TO_SKU = 4
 
 interface LayoutItemRow {
   item: PCBuildExportItem
-  groupLabel: string
+  groupLines: string[]
   nameLines: string[]
-  skuLine: string
+  skuLines: string[]
   height: number
 }
 
@@ -37,6 +73,7 @@ interface LayoutPlan {
 
 /**
  * Tách chuỗi thành nhiều dòng vừa với chiều rộng maxWidth
+ * Tự động cắt tách các từ dài liên tục không có khoảng trắng (như SKU dài)
  */
 function wrapText(
   ctx: CanvasRenderingContext2D,
@@ -134,7 +171,6 @@ function computeLayout(
   ctx: CanvasRenderingContext2D,
   snapshot: PCBuildExportSnapshot
 ): LayoutPlan {
-  const contentWidth = CANVAS_WIDTH - PADDING_X * 2 // 1100px
   let currentY = 0
 
   // 1. Accent bar đỉnh ảnh
@@ -149,7 +185,7 @@ function computeLayout(
   currentY += 15
   // Tiêu đề cấu hình
   ctx.font = 'bold 26px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
-  const titleLines = wrapText(ctx, snapshot.buildName || 'Cấu hình PC', contentWidth - 300)
+  const titleLines = wrapText(ctx, snapshot.buildName || 'Cấu hình PC', CONTENT_WIDTH - 300)
   currentY += Math.max(titleLines.length * 34, 34)
   // Thời điểm xuất & ngày lưu
   currentY += 30
@@ -164,26 +200,44 @@ function computeLayout(
   const tableHeaderHeight = 44
   currentY += tableHeaderHeight
 
-  // Đo các dòng linh kiện
-  const nameColWidth = 500
+  // Đo lường từng dòng linh kiện theo bounds và font thực tế
   const rowLayouts: LayoutItemRow[] = []
 
-  ctx.font = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
   for (const item of snapshot.items) {
-    const groupLabel = COMPONENT_TYPE_LABELS[item.componentType] || 'Linh kiện'
-    ctx.font = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
-    const nameLines = wrapText(ctx, item.name, nameColWidth)
-    const skuLine = `SKU: ${item.sku}`
+    // 1. Nhóm linh kiện
+    const groupText = COMPONENT_TYPE_LABELS[item.componentType] || 'Linh kiện'
+    ctx.font = FONT_TABLE_GROUP
+    const groupLines = wrapText(ctx, groupText, COL_GROUP_TEXT_WIDTH)
+    const groupHeight = groupLines.length * LINE_HEIGHT_GROUP
 
-    // Tính chiều cao dòng: padding top 12 + nameLines*20 + skuLine 18 + padding bottom 12
-    const contentHeight = Math.max(nameLines.length * 20 + 22, 44)
-    const rowHeight = contentHeight + 20
+    // 2. Tên linh kiện
+    ctx.font = FONT_TABLE_NAME
+    const nameLines = wrapText(ctx, item.name, COL_NAME_TEXT_WIDTH)
+    const nameHeight = nameLines.length * LINE_HEIGHT_NAME
+
+    // 3. SKU
+    const rawSku = (item.sku ?? '').trim()
+    const skuText = rawSku ? `SKU: ${rawSku}` : ''
+    let skuLines: string[] = []
+    let skuHeight = 0
+    if (skuText) {
+      ctx.font = FONT_TABLE_SKU
+      skuLines = wrapText(ctx, skuText, COL_NAME_TEXT_WIDTH)
+      skuHeight =
+        (nameLines.length > 0 ? GAP_NAME_TO_SKU : 0) +
+        skuLines.length * LINE_HEIGHT_SKU
+    }
+
+    const nameColHeight = nameHeight + skuHeight
+    const numericColHeight = 20 // 1 dòng chiều cao cho cột số lượng / đơn giá / thành tiền
+    const contentHeight = Math.max(groupHeight, nameColHeight, numericColHeight)
+    const rowHeight = ROW_PADDING_TOP + contentHeight + ROW_PADDING_BOTTOM
 
     rowLayouts.push({
       item,
-      groupLabel,
+      groupLines,
       nameLines,
-      skuLine,
+      skuLines,
       height: rowHeight,
     })
     currentY += rowHeight
@@ -218,7 +272,7 @@ function computeLayout(
     issues: snapshot.issues,
   })
 
-  const compBoxInnerWidth = contentWidth - 40
+  const compBoxInnerWidth = CONTENT_WIDTH - 40
   const compatibilityLines: { severity: string; textLines: string[] }[] = []
 
   ctx.font = '13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
@@ -290,7 +344,7 @@ function computeLayout(
   ctx.font = '12px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
   const footerDisclaimerLines: string[] = []
   for (const disc of disclaimers) {
-    const lines = wrapText(ctx, disc, contentWidth)
+    const lines = wrapText(ctx, disc, CONTENT_WIDTH)
     footerDisclaimerLines.push(...lines)
   }
 
@@ -344,8 +398,6 @@ async function drawToCanvas(
   ctx.fillStyle = '#DC2626'
   ctx.fillRect(0, 0, canvas.width, 8)
 
-  const contentWidth = CANVAS_WIDTH - PADDING_X * 2 // 1100px
-
   // 3. Vẽ Header
   const logoImg = await loadLogoImage(markSrc)
   if (signal?.aborted) {
@@ -392,7 +444,7 @@ async function drawToCanvas(
   ctx.textBaseline = 'top'
   ctx.font = 'bold 26px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
   ctx.fillStyle = '#0F172A'
-  const titleLines = wrapText(ctx, snapshot.buildName || 'Cấu hình PC', contentWidth - 300)
+  const titleLines = wrapText(ctx, snapshot.buildName || 'Cấu hình PC', CONTENT_WIDTH - 300)
   let currTitleY = titleY
   for (const line of titleLines) {
     ctx.fillText(line, PADDING_X, currTitleY)
@@ -424,31 +476,25 @@ async function drawToCanvas(
   const tableY = layout.tableTop
   // Nền thanh tiêu đề bảng
   ctx.fillStyle = '#F8FAFC'
-  ctx.fillRect(PADDING_X, tableY, contentWidth, layout.tableHeaderHeight)
+  ctx.fillRect(PADDING_X, tableY, CONTENT_WIDTH, layout.tableHeaderHeight)
   ctx.strokeStyle = '#E2E8F0'
-  ctx.strokeRect(PADDING_X, tableY, contentWidth, layout.tableHeaderHeight)
+  ctx.strokeRect(PADDING_X, tableY, CONTENT_WIDTH, layout.tableHeaderHeight)
 
-  // Cột:
-  // Col 0: Nhóm [50, 240] (190)
-  // Col 1: Tên & SKU [250, 750] (500)
-  // Col 2: SL [760, 830] (70)
-  // Col 3: Đơn giá [840, 960] (120)
-  // Col 4: Thành tiền [970, 1150] (180)
-  ctx.font = 'bold 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+  ctx.font = FONT_TABLE_HEADER
   ctx.fillStyle = '#475569'
   ctx.textBaseline = 'middle'
 
   const thMiddleY = tableY + layout.tableHeaderHeight / 2
   ctx.textAlign = 'left'
-  ctx.fillText('NHÓM LINH KIỆN', PADDING_X + 15, thMiddleY)
-  ctx.fillText('TÊN SẢN PHẨM & SKU', PADDING_X + 200, thMiddleY)
+  ctx.fillText('NHÓM LINH KIỆN', COL_GROUP_X, thMiddleY)
+  ctx.fillText('TÊN SẢN PHẨM & SKU', COL_NAME_X, thMiddleY)
   ctx.textAlign = 'center'
-  ctx.fillText('SL', PADDING_X + 740, thMiddleY)
+  ctx.fillText('SL', COL_QTY_CENTER_X, thMiddleY)
   ctx.textAlign = 'right'
-  ctx.fillText('ĐƠN GIÁ', PADDING_X + 900, thMiddleY)
-  ctx.fillText('THÀNH TIỀN', CANVAS_WIDTH - PADDING_X - 15, thMiddleY)
+  ctx.fillText('ĐƠN GIÁ', COL_UNIT_PRICE_RIGHT_X, thMiddleY)
+  ctx.fillText('THÀNH TIỀN', COL_TOTAL_RIGHT_X, thMiddleY)
 
-  // Vẽ các dòng linh kiện
+  // Vẽ các dòng linh kiện theo bounds và font đã đo
   let rowY = tableY + layout.tableHeaderHeight
   for (let idx = 0; idx < layout.rowLayouts.length; idx++) {
     const row = layout.rowLayouts[idx]
@@ -456,7 +502,7 @@ async function drawToCanvas(
     // Nền xen kẽ nhẹ
     if (idx % 2 === 1) {
       ctx.fillStyle = '#FAFAFA'
-      ctx.fillRect(PADDING_X, rowY, contentWidth, row.height)
+      ctx.fillRect(PADDING_X, rowY, CONTENT_WIDTH, row.height)
     }
 
     // Đường phân cách dưới dòng
@@ -467,42 +513,55 @@ async function drawToCanvas(
     ctx.lineTo(CANVAS_WIDTH - PADDING_X, rowY + row.height)
     ctx.stroke()
 
-    // 1. Nhóm linh kiện
+    // 1. Nhóm linh kiện (nhiều dòng nếu cần)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    ctx.font = 'bold 12px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+    ctx.font = FONT_TABLE_GROUP
     ctx.fillStyle = '#DC2626'
-    ctx.fillText(row.groupLabel, PADDING_X + 15, rowY + 12)
-
-    // 2. Tên & SKU
-    ctx.font = 'bold 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
-    ctx.fillStyle = '#0F172A'
-    let nameLineY = rowY + 12
-    for (const line of row.nameLines) {
-      ctx.fillText(line, PADDING_X + 200, nameLineY)
-      nameLineY += 20
+    let groupY = rowY + ROW_PADDING_TOP
+    for (const line of row.groupLines) {
+      ctx.fillText(line, COL_GROUP_X, groupY)
+      groupY += LINE_HEIGHT_GROUP
     }
-    ctx.font = '500 11px monospace'
-    ctx.fillStyle = '#64748B'
-    ctx.fillText(row.skuLine, PADDING_X + 200, nameLineY + 2)
+
+    // 2. Tên sản phẩm & SKU (mỗi khối nhiều dòng nếu cần)
+    ctx.font = FONT_TABLE_NAME
+    ctx.fillStyle = '#0F172A'
+    let nameY = rowY + ROW_PADDING_TOP
+    for (const line of row.nameLines) {
+      ctx.fillText(line, COL_NAME_X, nameY)
+      nameY += LINE_HEIGHT_NAME
+    }
+
+    if (row.skuLines.length > 0) {
+      if (row.nameLines.length > 0) {
+        nameY += GAP_NAME_TO_SKU
+      }
+      ctx.font = FONT_TABLE_SKU
+      ctx.fillStyle = '#64748B'
+      for (const line of row.skuLines) {
+        ctx.fillText(line, COL_NAME_X, nameY)
+        nameY += LINE_HEIGHT_SKU
+      }
+    }
 
     // 3. Số lượng
     ctx.textAlign = 'center'
-    ctx.font = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+    ctx.font = FONT_TABLE_QTY
     ctx.fillStyle = '#0F172A'
-    ctx.fillText(String(row.item.quantity), PADDING_X + 740, rowY + 14)
+    ctx.fillText(String(row.item.quantity), COL_QTY_CENTER_X, rowY + ROW_PADDING_TOP)
 
     // 4. Đơn giá
     ctx.textAlign = 'right'
-    ctx.font = '500 13px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+    ctx.font = FONT_TABLE_UNIT_PRICE
     ctx.fillStyle = '#334155'
-    ctx.fillText(formatVnd(row.item.unitPrice), PADDING_X + 900, rowY + 14)
+    ctx.fillText(formatVnd(row.item.unitPrice), COL_UNIT_PRICE_RIGHT_X, rowY + ROW_PADDING_TOP)
 
     // 5. Thành tiền
     ctx.textAlign = 'right'
-    ctx.font = 'bold 14px "Inter", "Segoe UI", Roboto, Arial, sans-serif'
+    ctx.font = FONT_TABLE_TOTAL
     ctx.fillStyle = '#0F172A'
-    ctx.fillText(formatVnd(row.item.lineTotal), CANVAS_WIDTH - PADDING_X - 15, rowY + 14)
+    ctx.fillText(formatVnd(row.item.lineTotal), COL_TOTAL_RIGHT_X, rowY + ROW_PADDING_TOP)
 
     rowY += row.height
   }
@@ -510,15 +569,15 @@ async function drawToCanvas(
   // Viền bao quanh toàn bảng
   ctx.strokeStyle = '#E2E8F0'
   ctx.lineWidth = 1
-  ctx.strokeRect(PADDING_X, tableY, contentWidth, layout.tableTotalHeight)
+  ctx.strokeRect(PADDING_X, tableY, CONTENT_WIDTH, layout.tableTotalHeight)
 
   // 5. Khối Tổng Tiền
   const sumY = layout.summaryTop
   ctx.fillStyle = '#F8FAFC'
-  ctx.fillRect(PADDING_X, sumY, contentWidth, layout.summaryHeight)
+  ctx.fillRect(PADDING_X, sumY, CONTENT_WIDTH, layout.summaryHeight)
   ctx.strokeStyle = '#E2E8F0'
   ctx.lineWidth = 1
-  ctx.strokeRect(PADDING_X, sumY, contentWidth, layout.summaryHeight)
+  ctx.strokeRect(PADDING_X, sumY, CONTENT_WIDTH, layout.summaryHeight)
 
   // Accent bên trái card tổng tiền
   ctx.fillStyle = '#DC2626'
@@ -543,9 +602,9 @@ async function drawToCanvas(
   if (layout.specsHeight > 0) {
     const spY = layout.specsTop
     ctx.fillStyle = '#FFFBEB' // Vàng nhạt
-    ctx.fillRect(PADDING_X, spY, contentWidth, layout.specsHeight)
+    ctx.fillRect(PADDING_X, spY, CONTENT_WIDTH, layout.specsHeight)
     ctx.strokeStyle = '#FDE68A'
-    ctx.strokeRect(PADDING_X, spY, contentWidth, layout.specsHeight)
+    ctx.strokeRect(PADDING_X, spY, CONTENT_WIDTH, layout.specsHeight)
 
     ctx.textAlign = 'left'
     ctx.textBaseline = 'middle'
@@ -593,9 +652,9 @@ async function drawToCanvas(
   }
 
   ctx.fillStyle = compBg
-  ctx.fillRect(PADDING_X, compY, contentWidth, layout.compatibilityHeight)
+  ctx.fillRect(PADDING_X, compY, CONTENT_WIDTH, layout.compatibilityHeight)
   ctx.strokeStyle = compBorder
-  ctx.strokeRect(PADDING_X, compY, contentWidth, layout.compatibilityHeight)
+  ctx.strokeRect(PADDING_X, compY, CONTENT_WIDTH, layout.compatibilityHeight)
 
   // Tiêu đề tương thích
   ctx.textAlign = 'left'
