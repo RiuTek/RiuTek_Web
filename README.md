@@ -1,25 +1,58 @@
-# RiuTek Web
+<div align="center">
+  <img src="src/assets/branding/riutek-mark-v2.png" alt="RiuTek logo" width="80" />
+  <h1>RiuTek Web</h1>
+  <p>Find your components. Put your PC together.</p>
+  <p>
+    <a href="https://riutek.store">Live website</a> &nbsp;·&nbsp;
+    <a href="https://github.com/RiuTek/RiuTek_API">Backend repository</a> &nbsp;·&nbsp;
+    <a href="#try-the-demo">Try the demo</a>
+  </p>
 
-React frontend for RiuTek, a personal e-commerce project for buying PC components and choosing parts for a custom build. The application includes a customer storefront and a role-protected administration area.
+![React 19](https://img.shields.io/badge/React-19-149ECA?style=flat-square&logo=react&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=flat-square&logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
 
-[Live website](https://riutek.store) · [Backend repository](https://github.com/RiuTek/RiuTek_API)
+</div>
+
+---
+
+RiuTek is a personal e-commerce project for buying PC components and choosing parts for a custom build. This repository contains the React storefront and a role-protected administration area.
+
+> **Try it online** — Browse components and export a PC build without an account at [riutek.store](https://riutek.store). Sign in to save builds and try checkout. Stripe uses test mode.
+
+[Features](#features) · [Technology](#technology) · [API integration](#api-and-authentication) · [Setup](#run-locally) · [Build](#checks-and-build) · [Roadmap](#roadmap)
 
 ## Features
 
-- **Browse components:** product search, nested categories, technical checkbox filters, sorting, pagination and image galleries.
-- **Build a PC:** choose components, review compatibility findings and estimated power requirements, and download a configuration as a PNG. Guests can use the builder without an account; customers can save and revisit their builds.
-- **Shop and order:** persistent account carts, selection of cart items for checkout, Buy Now for a product or saved build, delivery addresses, COD and Stripe Checkout in test mode.
-- **Manage an account:** registration, sign-in, profile/address updates, saved configurations and order history with the actions supported by each order's state.
-- **Administer the store:** Admin/Staff screens for categories, products, stock adjustments, Excel imports, orders and homepage banners. Bulk import accepts an Excel workbook and an image folder, matching files by SKU before upload to R2.
-- **Browse the homepage:** administrator-managed banner carousel and product rows loaded from the catalog.
+| Feature | What you can do |
+| :--- | :--- |
+| **Browse components** | product search, nested categories, technical checkbox filters, sorting, pagination and image galleries. |
+| **Build a PC** | choose components, review compatibility findings and estimated power requirements, and download a configuration as a PNG. Guests can use the builder without an account; customers can save and revisit their builds. |
+| **Shop and order** | persistent account carts, selection of cart items for checkout, Buy Now for a product or saved build, delivery addresses, COD and Stripe Checkout in test mode. |
+| **Manage an account** | registration, sign-in, profile/address updates, saved configurations and order history with the actions supported by each order's state. |
+| **Administer the store** | Admin/Staff screens for categories, products, stock adjustments, Excel imports, orders and homepage banners. Bulk import accepts an Excel workbook and an image folder, matching files by SKU before upload to R2. |
+| **Browse the homepage** | administrator-managed banner carousel and product rows loaded from the catalog. |
 
 Compatibility messages provide guidance; they do not guarantee that every build is suitable. Stock and price checks remain separate from hardware compatibility. The PNG is generated in the browser and is not uploaded or stored by the backend.
 
 ## Technology
 
-React 19 · TypeScript · Vite · React Router · Tailwind CSS · Lucide icons · native Canvas 2D
+| Area | Stack |
+| :--- | :--- |
+| Application | React 19, TypeScript, Vite |
+| Navigation | React Router |
+| Interface | Tailwind CSS, Lucide icons |
+| Build image export | Native Canvas 2D |
+| Hosting | Vercel, API proxy to Azure App Service |
 
-Source code is organized by feature under src/features. Shared layouts and UI components live in src/layouts and src/components; route definitions are in src/app/router.tsx.
+| Source | Purpose |
+| :--- | :--- |
+| `src/features` | Catalog, PC Builder, account, checkout and administration features |
+| `src/layouts` | Shared page layouts |
+| `src/components` | Shared UI components |
+| `src/app/router.tsx` | Route definitions |
 
 ## API and authentication
 
@@ -67,7 +100,7 @@ The production build is generated in dist. The Vercel project deploys the main b
 
 Stripe runs in test mode. The site demonstrates checkout and order workflows; it is not presented as a live retail service. Administrative accounts are not published in this repository.
 
-## Scope and future work
+## Roadmap
 
 The current web release covers the storefront, PC Builder, account/cart/checkout flows and store administration listed above.
 
