@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Cpu,
@@ -27,6 +27,83 @@ import { getCategories } from '../productApi'
 
 interface HomeCategoryMenuProps {
   initialCategories?: Category[]
+}
+
+/**
+ * Chuẩn hóa cây danh mục hiển thị trên Homepage:
+ * - Thanh list “Danh Mục Linh Kiện” chỉ có danh mục GỐC (parentId === null hoặc rỗng).
+ * - Danh mục con (parentId !== null) được gắn vào đúng subCategories của cha tương ứng,
+ *   không trở thành dòng độc lập ở list ngoài dù API trả về phẳng hay lặp lại ở mảng cấp ngoài.
+ * - Giữ nguyên toàn bộ subtree và không trùng lặp node theo id.
+ */
+function buildRootCategoriesTree(rawCategories: Category[]): Category[] {
+  if (!Array.isArray(rawCategories) || rawCategories.length === 0) {
+    return []
+  }
+
+  // 1. Thu thập tất cả các nodes theo id (khử trùng lặp node xuất hiện cả ở mảng ngoài lẫn subCategories)
+  const nodeMap = new Map<string, Category>()
+
+  function collectNodes(nodes: Category[]) {
+    if (!Array.isArray(nodes)) return
+    for (const node of nodes) {
+      if (!node || !node.id) continue
+      const existing = nodeMap.get(node.id)
+      if (!existing) {
+        nodeMap.set(node.id, {
+          ...node,
+          subCategories: Array.isArray(node.subCategories) ? [...node.subCategories] : [],
+        })
+      } else {
+        // Hợp nhất subCategories nếu node mới có thêm con
+        if (Array.isArray(node.subCategories) && node.subCategories.length > 0) {
+          const existingSubIds = new Set(existing.subCategories.map((s) => s.id))
+          for (const sub of node.subCategories) {
+            if (sub && sub.id && !existingSubIds.has(sub.id)) {
+              existing.subCategories.push(sub)
+              existingSubIds.add(sub.id)
+            }
+          }
+        }
+      }
+      if (Array.isArray(node.subCategories) && node.subCategories.length > 0) {
+        collectNodes(node.subCategories)
+      }
+    }
+  }
+
+  collectNodes(rawCategories)
+
+  // 2. Gắn kết quan hệ cha - con nếu child có parentId hợp lệ và chưa nằm trong parent.subCategories
+  for (const node of nodeMap.values()) {
+    if (node.parentId && node.parentId.trim() !== '') {
+      const parent = nodeMap.get(node.parentId.trim())
+      if (parent) {
+        if (!parent.subCategories.some((s) => s.id === node.id)) {
+          parent.subCategories.push(node)
+        }
+      }
+    }
+  }
+
+  // 3. Chỉ lấy các danh mục GỐC (parentId === null hoặc rỗng theo contract Category)
+  // Duy trì thứ tự ban đầu của mảng rawCategories đối với các roots
+  const seenRootIds = new Set<string>()
+  const roots: Category[] = []
+
+  for (const raw of rawCategories) {
+    if (!raw || !raw.id) continue
+    const node = nodeMap.get(raw.id)
+    if (!node) continue
+
+    const isRoot = !node.parentId || node.parentId.trim() === ''
+    if (isRoot && !seenRootIds.has(node.id)) {
+      seenRootIds.add(node.id)
+      roots.push(node)
+    }
+  }
+
+  return roots
 }
 
 function getCategoryIcon(type: ComponentType) {
@@ -67,8 +144,18 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       ? initialCategories
       : fetchedCategories
 
-  const [activeCategory, setActiveCategory] = useState<Category | null>(null)
+  // Danh mục GỐC (parentId === null) cho thanh list chính
+  const rootCategories = useMemo(() => {
+    return buildRootCategoriesTree(categories)
+  }, [categories])
+
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
   const [mobileExpandedCatId, setMobileExpandedCatId] = useState<string | null>(null)
+
+  // Active root desktop được phân giải đồng bộ từ rootCategories trong render phase
+  const activeCategory = activeCategoryId
+    ? rootCategories.find((r) => r.id === activeCategoryId) ?? null
+    : null
 
   // Coordinators riêng biệt cho Desktop và Mobile để không hủy request lẫn nhau
   const [desktopCoordinator] = useState(() => new ProductFilterOptionsCoordinator())
@@ -200,7 +287,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
   // 3. Nạp lazy filter options cho mobile category khi được mở (khắc phục self-invalidation)
   useEffect(() => {
     if (!mobileExpandedCatId) return
-    const targetCat = categories.find((c) => c.id === mobileExpandedCatId)
+    const targetCat = rootCategories.find((c) => c.id === mobileExpandedCatId)
     if (!targetCat) return
 
     let isMounted = true
@@ -244,10 +331,10 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
     return () => {
       isMounted = false
     }
-  }, [mobileExpandedCatId, categories, mobileCoordinator, mobileRetryMap])
+  }, [mobileExpandedCatId, rootCategories, mobileCoordinator, mobileRetryMap])
 
   const handleRetryMobile = (catId: string) => {
-    const targetCat = categories.find((c) => c.id === catId)
+    const targetCat = rootCategories.find((c) => c.id === catId)
     if (targetCat) {
       mobileCoordinator.clearCache(
         mobileCoordinator.getScopeKey({
@@ -273,7 +360,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       clearTimeout(leaveTimeoutRef.current)
       leaveTimeoutRef.current = null
     }
-    setActiveCategory(cat)
+    setActiveCategoryId(cat.id)
   }
 
   const handleMouseLeaveRootOrPanel = () => {
@@ -283,7 +370,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
         menuContainerRef.current &&
         !menuContainerRef.current.contains(document.activeElement)
       ) {
-        setActiveCategory(null)
+        setActiveCategoryId(null)
       }
     }, 180)
   }
@@ -299,12 +386,56 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setActiveCategory(null)
+        setActiveCategoryId(null)
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [])
+
+  // Helper render danh mục con nhiều tầng cho Desktop Flyout Panel
+  const renderDesktopSubCategoryNode = (sub: Category, depth = 0): React.ReactNode => {
+    const hasSubChildren = Array.isArray(sub.subCategories) && sub.subCategories.length > 0
+    return (
+      <div key={sub.id} className={depth > 0 ? 'pl-3 border-l border-slate-200 ml-2 my-1' : 'space-y-0.5'}>
+        <Link
+          to={`/products?categoryId=${sub.id}&componentType=${sub.componentType}`}
+          className={`block py-1.5 px-2.5 rounded-lg text-xs hover:text-red-600 hover:bg-red-50/70 transition-colors truncate ${
+            depth === 0 ? 'font-semibold text-slate-800' : 'text-slate-600'
+          }`}
+        >
+          {sub.name}
+        </Link>
+        {hasSubChildren && (
+          <div className="space-y-0.5">
+            {sub.subCategories.map((child) => renderDesktopSubCategoryNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Helper render danh mục con nhiều tầng cho Mobile Accordion
+  const renderMobileSubCategoryNode = (sub: Category, depth = 0): React.ReactNode => {
+    const hasSubChildren = Array.isArray(sub.subCategories) && sub.subCategories.length > 0
+    return (
+      <div key={sub.id} className={depth > 0 ? 'pl-3 border-l border-slate-200 ml-1.5 my-0.5' : ''}>
+        <Link
+          to={`/products?categoryId=${sub.id}&componentType=${sub.componentType}`}
+          className={`block py-1 hover:text-red-600 truncate ${
+            depth === 0 ? 'text-slate-700 font-medium' : 'text-slate-600 text-[11px]'
+          }`}
+        >
+          {sub.name}
+        </Link>
+        {hasSubChildren && (
+          <div className="space-y-0.5">
+            {sub.subCategories.map((child) => renderMobileSubCategoryNode(child, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -343,7 +474,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
           </div>
         )}
 
-        {!isLoadingCats && !categoriesError && categories.length === 0 && (
+        {!isLoadingCats && !categoriesError && rootCategories.length === 0 && (
           <div className="p-4 text-xs text-slate-400 italic text-center">
             Chưa có danh mục sản phẩm
           </div>
@@ -351,10 +482,10 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
 
         {!isLoadingCats &&
           !categoriesError &&
-          categories.map((cat) => {
+          rootCategories.map((cat) => {
             const isHovered = activeCategory?.id === cat.id
             const isMobileExpanded = mobileExpandedCatId === cat.id
-            const hasChildren = cat.subCategories && cat.subCategories.length > 0
+            const hasChildren = Array.isArray(cat.subCategories) && cat.subCategories.length > 0
 
             return (
               <div key={cat.id} className="relative">
@@ -411,22 +542,14 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
                       <ArrowRight className="w-3 h-3" />
                     </Link>
 
-                    {/* Danh mục con nếu có */}
+                    {/* Danh mục con nếu có (hỗ trợ hiển thị phân cấp subtree) */}
                     {hasChildren && (
                       <div className="space-y-1">
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                           Danh mục con:
                         </span>
                         <div className="space-y-1">
-                          {cat.subCategories.map((sub) => (
-                            <Link
-                              key={sub.id}
-                              to={`/products?categoryId=${sub.id}&componentType=${sub.componentType}`}
-                              className="block py-1 text-slate-700 hover:text-red-600 truncate"
-                            >
-                              {sub.name}
-                            </Link>
-                          ))}
+                          {cat.subCategories.map((sub) => renderMobileSubCategoryNode(sub, 0))}
                         </div>
                       </div>
                     )}
@@ -515,22 +638,14 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-            {/* 1. Danh mục con thật theo cây từ API */}
+            {/* 1. Danh mục con thật theo cây từ API (hỗ trợ phân cấp nhiều tầng con -> cháu) */}
             {activeCategory.subCategories && activeCategory.subCategories.length > 0 && (
               <div>
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
                   Danh Mục Con
                 </h4>
-                <div className="space-y-1">
-                  {activeCategory.subCategories.map((sub) => (
-                    <Link
-                      key={sub.id}
-                      to={`/products?categoryId=${sub.id}&componentType=${sub.componentType}`}
-                      className="block py-1.5 px-2.5 rounded-lg text-sm text-slate-700 hover:text-red-600 hover:bg-red-50/70 font-medium transition-colors truncate"
-                    >
-                      {sub.name}
-                    </Link>
-                  ))}
+                <div className="space-y-1 max-h-[360px] overflow-y-auto pr-2">
+                  {activeCategory.subCategories.map((sub) => renderDesktopSubCategoryNode(sub, 0))}
                 </div>
               </div>
             )}
