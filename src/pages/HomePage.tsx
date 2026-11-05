@@ -80,61 +80,70 @@ export const HomePage: React.FC = () => {
             />
           </div>
 
-          {/* Banner Carousel: Lớn, chiếm phần chính trên Desktop; hiển thị ĐẦU TIÊN trên Mobile (order-1) */}
-          <div className="w-full lg:flex-1 min-w-0 order-1 lg:order-2">
+          {/* Vùng Phải trên Desktop: Toàn bộ vùng còn lại (~1000px), chứa Banner Carousel lớn + dải PC Builder gọn */}
+          <div className="w-full lg:flex-1 min-w-0 order-1 lg:order-2 flex flex-col gap-4">
             <HomeBannerCarousel />
-          </div>
 
-          {/* Khối Giới Thiệu PC Builder Gọn: Desktop ở cột phải; Mobile hiển thị sau Menu (order-3) */}
-          <div className="w-full lg:w-72 xl:w-80 flex-shrink-0 order-3 lg:order-3 bg-white p-6 sm:p-7 rounded-3xl shadow-[0_12px_40px_rgba(220,38,38,0.06)] border border-red-100/70 flex flex-col justify-between relative overflow-hidden min-h-[300px] lg:min-h-[380px]">
-            <div className="absolute -right-16 -top-16 w-56 h-56 bg-red-100/40 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -left-16 -bottom-16 w-56 h-56 bg-slate-100/60 rounded-full blur-3xl pointer-events-none" />
-
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-200/80 rounded-full mb-4 shadow-xs">
-                <Flame className="w-3.5 h-3.5 text-red-600" />
-                <span className="text-[11px] font-extrabold text-red-600 uppercase tracking-wider">
-                  Cấu Hình PC
-                </span>
+            {/* Dải giới thiệu PC Builder gọn nằm ngay dưới Banner trên Desktop */}
+            <div className="hidden lg:flex items-center justify-between gap-4 p-4 sm:p-5 bg-white rounded-2xl border border-red-100/70 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0">
+                  <Flame className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Tự chọn cấu hình PC phù hợp
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Đối chiếu chuẩn socket, công suất nguồn và kích thước linh kiện trực quan.
+                  </p>
+                </div>
               </div>
 
-              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 tracking-tight mb-3 leading-snug">
-                Tự chọn cấu hình PC phù hợp
-              </h2>
-
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-6">
-                Tối ưu hóa dàn máy theo ngân sách và nhu cầu thực tế. Đối chiếu chuẩn socket, công suất nguồn và kích thước linh kiện trực quan.
-              </p>
-
-              <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-2.5 flex-shrink-0">
                 <Link
                   to="/pc-builder"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-full text-xs sm:text-sm font-bold shadow-md shadow-red-600/25 hover:shadow-red-600/40 transition-all transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs"
                 >
-                  <Sparkles className="w-4 h-4" />
+                  <Sparkles className="w-3.5 h-3.5" />
                   <span>Trải Nghiệm PC Builder</span>
                 </Link>
-
                 <Link
                   to="/products"
-                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 text-slate-800 rounded-full text-xs font-semibold hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200"
+                  className="inline-flex items-center gap-1 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-semibold transition-colors border border-slate-200"
                 >
-                  <span>Xem Toàn Bộ Linh Kiện</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                  <span>Linh Kiện</span>
+                  <ArrowRight className="w-3 h-3" />
                 </Link>
               </div>
             </div>
+          </div>
 
-            {/* Thông số tham chiếu thực tế */}
-            <div className="relative z-10 pt-4 mt-6 border-t border-slate-100 grid grid-cols-2 gap-2 text-slate-600 text-xs">
-              <div>
-                <div className="font-bold text-slate-950 font-mono text-xs">Đồng bộ</div>
-                <div className="text-[10px] text-slate-500">Chuẩn form factor</div>
+          {/* Khối Giới Thiệu PC Builder trên Mobile: hiển thị sau Menu (order-3) */}
+          <div className="w-full block lg:hidden order-3 p-4 bg-white rounded-2xl border border-red-100/70 shadow-2xs">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-9 h-9 rounded-xl bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0">
+                <Flame className="w-4 h-4" />
               </div>
               <div>
-                <div className="font-bold text-red-600 font-mono text-xs">Trực quan</div>
-                <div className="text-[10px] text-slate-500">Đối chiếu socket &amp; TDP</div>
+                <h3 className="text-sm font-bold text-slate-900">Tự chọn cấu hình PC phù hợp</h3>
+                <p className="text-[11px] text-slate-500">Đối chiếu chuẩn socket và công suất nguồn.</p>
               </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Link
+                to="/pc-builder"
+                className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-red-600 text-white rounded-xl text-xs font-bold shadow-xs"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>PC Builder</span>
+              </Link>
+              <Link
+                to="/products"
+                className="inline-flex items-center justify-center gap-1 px-3.5 py-2 bg-slate-100 text-slate-800 rounded-xl text-xs font-semibold border border-slate-200"
+              >
+                <span>Xem linh kiện</span>
+              </Link>
             </div>
           </div>
         </div>

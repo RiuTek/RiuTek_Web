@@ -11,6 +11,7 @@ import {
   Loader2,
   PlusCircle,
   RefreshCw,
+  RotateCcw,
   Save,
   Trash2,
   UploadCloud,
@@ -49,6 +50,18 @@ function createEmptyBannerDraft(): BannerDraft {
   }
 }
 
+/**
+ * Trạng thái của tệp ảnh candidate đang được chọn để tải lên
+ */
+interface CandidateImageState {
+  file: File
+  blobUrl: string | null
+  status: 'pending' | 'error' | 'confirmed'
+  objectKey: string | null
+  publicUrl: string | null
+  errorMessage: string | null
+}
+
 export const AdminBannersPage: React.FC = () => {
   const { status: authStatus, user, getAccessToken } = useAuth()
   const ownerId = user?.id ?? ''
@@ -66,12 +79,17 @@ export const AdminBannersPage: React.FC = () => {
   const [formSuccess, setFormSuccess] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 
-  // Upload state
+  // Ảnh ban đầu khi mở form Edit (dùng để quay lại nếu upload mới fail/hủy)
+  const [initialSavedImage, setInitialSavedImage] = useState<{
+    objectKey: string
+    imageUrl: string
+  } | null>(null)
+
+  // Candidate image state (đang chọn / đang upload / confirm / error)
+  const [candidateImage, setCandidateImage] = useState<CandidateImageState | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadProgressMsg, setUploadProgressMsg] = useState<string | null>(null)
-  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null)
-  const [selectedFileForRetry, setSelectedFileForRetry] = useState<File | null>(null)
 
   // Delete modal state
   const [deleteTarget, setDeleteTarget] = useState<ManagedBannerDto | null>(null)
@@ -82,22 +100,33 @@ export const AdminBannersPage: React.FC = () => {
   const isMountedRef = useRef(true)
   const ownerIdRef = useRef(ownerId)
   const reqSeqRef = useRef(0)
+  const uploadSeqRef = useRef(0)
   const uploadAbortRef = useRef<AbortController | null>(null)
+  const candidateBlobRef = useRef<string | null>(null)
   const isSavingRef = useRef(false)
 
+  // Helper thu hồi blob URL an toàn
+  const cleanupCandidateBlob = useCallback(() => {
+    if (candidateBlobRef.current) {
+      URL.revokeObjectURL(candidateBlobRef.current)
+      candidateBlobRef.current = null
+    }
+  }, [])
+
+  // Lifecycle form/session/unmount — tách biệt hoàn toàn khỏi preview URL
   useEffect(() => {
     isMountedRef.current = true
     ownerIdRef.current = ownerId
+
     return () => {
       isMountedRef.current = false
       if (uploadAbortRef.current) {
         uploadAbortRef.current.abort()
+        uploadAbortRef.current = null
       }
-      if (previewBlobUrl) {
-        URL.revokeObjectURL(previewBlobUrl)
-      }
+      cleanupCandidateBlob()
     }
-  }, [ownerId, previewBlobUrl])
+  }, [ownerId, cleanupCandidateBlob])
 
   // Tải danh sách banner quản trị
   const loadBanners = useCallback(
@@ -139,39 +168,45 @@ export const AdminBannersPage: React.FC = () => {
     }
   }, [loadBanners])
 
-  // Xử lý dọn dẹp preview object URL
-  const cleanupPreviewBlob = useCallback(() => {
-    if (previewBlobUrl) {
-      URL.revokeObjectURL(previewBlobUrl)
-      setPreviewBlobUrl(null)
-    }
-  }, [previewBlobUrl])
-
-  // Bắt đầu upload file ảnh mới
+  // Bắt đầu upload file ảnh mới (candidate)
   const handleStartImageUpload = async (file: File) => {
-    // Nếu đang có upload cũ dở dang, hủy nó
+    // 1. Invalidate bất kỳ upload nào đang chạy dở
+    const seq = ++uploadSeqRef.current
     if (uploadAbortRef.current) {
       uploadAbortRef.current.abort()
+      uploadAbortRef.current = null
     }
+
     const controller = new AbortController()
     uploadAbortRef.current = controller
 
-    cleanupPreviewBlob()
-    const localBlob = URL.createObjectURL(file)
-    setPreviewBlobUrl(localBlob)
-    setSelectedFileForRetry(file)
+    // 2. Thu hồi blob cũ và tạo blob URL mới cho preview local
+    cleanupCandidateBlob()
+    const blobUrl = URL.createObjectURL(file)
+    candidateBlobRef.current = blobUrl
 
+    // 3. Khởi tạo candidate state
+    setCandidateImage({
+      file,
+      blobUrl,
+      status: 'pending',
+      objectKey: null,
+      publicUrl: null,
+      errorMessage: null,
+    })
     setIsUploading(true)
     setUploadError(null)
-    setUploadProgressMsg('Đang chuẩn bị tải ảnh lên kho lưu trữ R2...')
+    setUploadProgressMsg('Đang tải tệp lên Cloudflare R2...')
 
     try {
-      setUploadProgressMsg('Đang tải tệp lên Cloudflare R2...')
       const result = await executeWithAdminAuth({
         authStatus,
         user,
         getAccessToken,
-        isContextCurrent: () => isMountedRef.current && !controller.signal.aborted,
+        isContextCurrent: () =>
+          isMountedRef.current &&
+          uploadSeqRef.current === seq &&
+          !controller.signal.aborted,
         operation: (token) =>
           uploadBannerImage({
             file,
@@ -180,14 +215,20 @@ export const AdminBannersPage: React.FC = () => {
           }),
       })
 
-      if (!isMountedRef.current || controller.signal.aborted) return
+      if (!isMountedRef.current || uploadSeqRef.current !== seq) return
 
-      // Upload thành công -> cập nhật draft với objectKey và imageUrl đã confirm
-      setDraft((prev) => ({
-        ...prev,
-        imageObjectKey: result.objectKey,
-        imageUrl: result.publicUrl,
-      }))
+      // Tải và confirm thành công -> chuyển sang publicUrl R2 và giải phóng blob
+      cleanupCandidateBlob()
+
+      setCandidateImage({
+        file,
+        blobUrl: null,
+        status: 'confirmed',
+        objectKey: result.objectKey,
+        publicUrl: result.publicUrl,
+        errorMessage: null,
+      })
+
       setFieldErrors((prev) => {
         const next = { ...prev }
         delete next.image
@@ -195,32 +236,108 @@ export const AdminBannersPage: React.FC = () => {
       })
       setUploadProgressMsg(null)
     } catch (err: unknown) {
-      if (!isMountedRef.current || controller.signal.aborted) return
+      if (!isMountedRef.current || uploadSeqRef.current !== seq) return
       if (err instanceof DOMException && err.name === 'AbortError') return
 
       let errMsg = 'Tải ảnh lên kho lưu trữ thất bại.'
       if (err instanceof Error) {
         errMsg = err.message
       }
+
+      setCandidateImage((prev) => {
+        if (!prev || uploadSeqRef.current !== seq) return prev
+        return {
+          ...prev,
+          status: 'error',
+          errorMessage: errMsg,
+        }
+      })
       setUploadError(errMsg)
       setUploadProgressMsg(null)
     } finally {
-      if (isMountedRef.current && uploadAbortRef.current === controller) {
+      if (isMountedRef.current && uploadSeqRef.current === seq) {
         setIsUploading(false)
+        if (uploadAbortRef.current === controller) {
+          uploadAbortRef.current = null
+        }
       }
     }
   }
 
-  // Chọn banner để chỉnh sửa
-  const handleSelectEdit = (banner: ManagedBannerDto) => {
+  // Khôi phục về ảnh ban đầu (chỉ áp dụng khi formMode === 'edit')
+  const handleRevertToInitialImage = () => {
+    uploadSeqRef.current++
     if (uploadAbortRef.current) {
       uploadAbortRef.current.abort()
       uploadAbortRef.current = null
     }
-    cleanupPreviewBlob()
+    cleanupCandidateBlob()
+    setCandidateImage(null)
+    setIsUploading(false)
+    setUploadError(null)
+    setUploadProgressMsg(null)
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next.image
+      return next
+    })
+  }
+
+  // Xóa candidate khi ở chế độ tạo mới (quay về chưa có ảnh)
+  const handleClearCandidateInCreate = () => {
+    uploadSeqRef.current++
+    if (uploadAbortRef.current) {
+      uploadAbortRef.current.abort()
+      uploadAbortRef.current = null
+    }
+    cleanupCandidateBlob()
+    setCandidateImage(null)
+    setIsUploading(false)
+    setUploadError(null)
+    setUploadProgressMsg(null)
+  }
+
+  // Dọn sạch draft state khi reset form
+  const resetFormState = () => {
+    uploadSeqRef.current++
+    if (uploadAbortRef.current) {
+      uploadAbortRef.current.abort()
+      uploadAbortRef.current = null
+    }
+    cleanupCandidateBlob()
+    setCandidateImage(null)
+    setInitialSavedImage(null)
+    setIsUploading(false)
+    setUploadError(null)
+    setUploadProgressMsg(null)
+    setFormMode('create')
+    setEditingId(null)
+    setDraft(createEmptyBannerDraft())
+    setFieldErrors({})
+    setFormApiError(null)
+  }
+
+  // Chọn banner để chỉnh sửa
+  const handleSelectEdit = (banner: ManagedBannerDto) => {
+    if (isSaving) return
+
+    uploadSeqRef.current++
+    if (uploadAbortRef.current) {
+      uploadAbortRef.current.abort()
+      uploadAbortRef.current = null
+    }
+    cleanupCandidateBlob()
+    setCandidateImage(null)
+    setIsUploading(false)
+    setUploadError(null)
+    setUploadProgressMsg(null)
 
     setFormMode('edit')
     setEditingId(banner.id)
+    setInitialSavedImage({
+      objectKey: banner.imageObjectKey,
+      imageUrl: banner.imageUrl,
+    })
     setDraft({
       title: banner.title,
       imageObjectKey: banner.imageObjectKey,
@@ -232,30 +349,17 @@ export const AdminBannersPage: React.FC = () => {
     setFieldErrors({})
     setFormApiError(null)
     setFormSuccess(null)
-    setUploadError(null)
-    setSelectedFileForRetry(null)
   }
 
-  // Hủy chế độ chỉnh sửa -> quay về form thêm mới
+  // Hủy chỉnh sửa -> quay về form tạo mới sạch
   const handleCancelEdit = () => {
-    if (uploadAbortRef.current) {
-      uploadAbortRef.current.abort()
-      uploadAbortRef.current = null
-    }
-    cleanupPreviewBlob()
-
-    setFormMode('create')
-    setEditingId(null)
-    setDraft(createEmptyBannerDraft())
-    setFieldErrors({})
-    setFormApiError(null)
+    if (isSaving) return
+    resetFormState()
     setFormSuccess(null)
-    setUploadError(null)
-    setSelectedFileForRetry(null)
   }
 
   // Kiểm tra tính hợp lệ toàn bộ form
-  const validateForm = (): boolean => {
+  const validateForm = (): { isValid: boolean; effectiveObjectKey: string | null } => {
     const errors: Record<string, string> = {}
 
     const titleCheck = validateBannerTitle(draft.title)
@@ -273,12 +377,31 @@ export const AdminBannersPage: React.FC = () => {
       errors.displayOrder = orderCheck.error
     }
 
-    if (!draft.imageObjectKey || draft.imageObjectKey.trim() === '') {
+    let effectiveObjectKey: string | null = null
+
+    // Xác định objectKey hợp lệ:
+    // 1. Nếu có candidate mới: bắt buộc phải ở trạng thái 'confirmed'
+    if (candidateImage) {
+      if (candidateImage.status === 'pending') {
+        errors.image = 'Tệp ảnh mới đang được tải lên, vui lòng chờ hoàn tất.'
+      } else if (candidateImage.status === 'error') {
+        errors.image =
+          'Tệp ảnh mới tải lên thất bại. Vui lòng thử lại hoặc chọn "Giữ ảnh hiện tại".'
+      } else if (candidateImage.status === 'confirmed' && candidateImage.objectKey) {
+        effectiveObjectKey = candidateImage.objectKey
+      }
+    } else if (formMode === 'edit' && initialSavedImage?.objectKey) {
+      // 2. Nếu edit và không đổi ảnh: dùng objectKey đã lưu
+      effectiveObjectKey = initialSavedImage.objectKey
+    } else {
       errors.image = 'Vui lòng chọn và tải lên ảnh banner trước khi lưu.'
     }
 
     setFieldErrors(errors)
-    return Object.keys(errors).length === 0
+    return {
+      isValid: Object.keys(errors).length === 0 && Boolean(effectiveObjectKey),
+      effectiveObjectKey,
+    }
   }
 
   // Lưu Banner (Tạo mới hoặc Cập nhật)
@@ -289,7 +412,8 @@ export const AdminBannersPage: React.FC = () => {
     setFormApiError(null)
     setFormSuccess(null)
 
-    if (!validateForm()) return
+    const { isValid, effectiveObjectKey } = validateForm()
+    if (!isValid || !effectiveObjectKey) return
 
     const orderCheck = validateBannerDisplayOrder(draft.displayOrder)
     const normalizedOrder = orderCheck.isValid ? orderCheck.value : 0
@@ -301,7 +425,7 @@ export const AdminBannersPage: React.FC = () => {
       if (formMode === 'create') {
         const payload: CreateBannerRequest = {
           title: draft.title.trim(),
-          imageObjectKey: draft.imageObjectKey.trim(),
+          imageObjectKey: effectiveObjectKey.trim(),
           targetUrl: draft.targetUrl.trim(),
           displayOrder: normalizedOrder,
           isActive: Boolean(draft.isActive),
@@ -317,15 +441,16 @@ export const AdminBannersPage: React.FC = () => {
 
         if (!isMountedRef.current) return
 
+        // Dọn form trước, sau đó hiển thị thông báo thành công
+        resetFormState()
         setFormSuccess(`Đã tạo thành công banner "${created.title}".`)
-        handleCancelEdit()
         void loadBanners()
       } else {
         if (!editingId) return
 
         const payload: UpdateBannerRequest = {
           title: draft.title.trim(),
-          imageObjectKey: draft.imageObjectKey.trim(),
+          imageObjectKey: effectiveObjectKey.trim(),
           targetUrl: draft.targetUrl.trim(),
           displayOrder: normalizedOrder,
           isActive: Boolean(draft.isActive),
@@ -340,6 +465,13 @@ export const AdminBannersPage: React.FC = () => {
         })
 
         if (!isMountedRef.current) return
+
+        // Cập nhật lại initialSavedImage theo ảnh vừa lưu thành công
+        setInitialSavedImage({
+          objectKey: updated.imageObjectKey,
+          imageUrl: updated.imageUrl,
+        })
+        setCandidateImage(null)
 
         setFormSuccess(`Đã cập nhật banner "${updated.title}".`)
         void loadBanners()
@@ -373,9 +505,8 @@ export const AdminBannersPage: React.FC = () => {
 
       if (!isMountedRef.current) return
 
-      // Nếu banner đang được chỉnh sửa bị xóa, reset form
       if (editingId === deleteTarget.id) {
-        handleCancelEdit()
+        resetFormState()
       }
 
       setDeleteTarget(null)
@@ -383,7 +514,12 @@ export const AdminBannersPage: React.FC = () => {
     } catch (err: unknown) {
       if (!isMountedRef.current) return
       let msg = mapAdminApiError(err)
-      if (err && typeof err === 'object' && 'status' in err && (err as { status: number }).status === 409) {
+      if (
+        err &&
+        typeof err === 'object' &&
+        'status' in err &&
+        (err as { status: number }).status === 409
+      ) {
         msg = 'Không thể xóa banner vì tài nguyên ảnh đang được tham chiếu bởi bản ghi khác.'
       }
       setDeleteError(msg)
@@ -393,6 +529,22 @@ export const AdminBannersPage: React.FC = () => {
       }
     }
   }
+
+  // Xác định URL ảnh hiển thị hiện tại trong Preview
+  const displayPreviewUrl =
+    candidateImage?.publicUrl ||
+    candidateImage?.blobUrl ||
+    (formMode === 'edit' ? initialSavedImage?.imageUrl : null)
+
+  // Khóa nút lưu nếu đang upload hoặc candidate chưa confirmed
+  const isCandidateActive = candidateImage !== null
+  const isCandidatePendingOrError =
+    candidateImage?.status === 'pending' || candidateImage?.status === 'error'
+  const isSaveDisabled =
+    isSaving ||
+    isUploading ||
+    isCandidatePendingOrError ||
+    (formMode === 'create' && !candidateImage?.objectKey)
 
   return (
     <div className="space-y-6">
@@ -411,7 +563,7 @@ export const AdminBannersPage: React.FC = () => {
         <button
           type="button"
           onClick={() => void loadBanners()}
-          disabled={listStatus === 'loading'}
+          disabled={listStatus === 'loading' || isSaving}
           className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs disabled:opacity-50"
         >
           <RefreshCw
@@ -486,18 +638,18 @@ export const AdminBannersPage: React.FC = () => {
                     >
                       {/* Thumbnail & Info */}
                       <div className="flex items-start gap-4 flex-1 min-w-0">
-                        {/* Thumbnail */}
-                        <div className="w-24 h-14 sm:w-32 sm:h-18 rounded-lg bg-slate-100 border border-slate-200 flex-shrink-0 overflow-hidden relative">
+                        {/* Thumbnail: tỷ lệ 8:3 với object-contain để xem toàn bộ artwork */}
+                        <div className="w-28 sm:w-36 aspect-[8/3] rounded-lg bg-slate-950 border border-slate-200 flex-shrink-0 overflow-hidden relative flex items-center justify-center">
                           {item.imageUrl ? (
                             <img
                               src={item.imageUrl}
                               alt={item.title}
                               loading="lazy"
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-contain object-center"
                             />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center text-slate-400">
-                              <ImageIcon className="w-6 h-6" />
+                              <ImageIcon className="w-5 h-5" />
                             </div>
                           )}
                         </div>
@@ -547,7 +699,8 @@ export const AdminBannersPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleSelectEdit(item)}
-                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                          disabled={isSaving}
+                          className={`inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50 ${
                             isBeingEdited
                               ? 'bg-red-600 text-white'
                               : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
@@ -563,7 +716,8 @@ export const AdminBannersPage: React.FC = () => {
                             setDeleteTarget(item)
                             setDeleteError(null)
                           }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors"
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-50"
                           title="Xóa banner"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -596,7 +750,8 @@ export const AdminBannersPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleCancelEdit}
-                  className="text-xs text-slate-500 hover:text-slate-800 font-semibold"
+                  disabled={isSaving}
+                  className="text-xs text-slate-500 hover:text-slate-800 font-semibold disabled:opacity-50"
                 >
                   Hủy sửa
                 </button>
@@ -631,6 +786,7 @@ export const AdminBannersPage: React.FC = () => {
                   id="banner-title"
                   type="text"
                   value={draft.title}
+                  disabled={isSaving}
                   onChange={(e) => {
                     const val = e.target.value
                     setDraft((prev) => ({ ...prev, title: val }))
@@ -644,7 +800,7 @@ export const AdminBannersPage: React.FC = () => {
                   }}
                   maxLength={160}
                   placeholder="Ví dụ: Đại Tiệc Siêu Card Màn Hình RTX 40-Series"
-                  className={`w-full px-3.5 py-2.5 text-xs text-slate-900 bg-white border rounded-xl outline-none transition ${
+                  className={`w-full px-3.5 py-2.5 text-xs text-slate-900 bg-white border rounded-xl outline-none transition disabled:bg-slate-50 ${
                     fieldErrors.title
                       ? 'border-rose-400 bg-rose-50/30 focus:border-rose-600'
                       : 'border-slate-300 focus:border-red-600'
@@ -657,18 +813,44 @@ export const AdminBannersPage: React.FC = () => {
 
               {/* 2. Ảnh Banner & Upload */}
               <div className="space-y-1.5">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-                  Ảnh banner <span className="text-red-600">*</span>
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-slate-700">
+                    Ảnh banner <span className="text-red-600">*</span>
+                  </label>
 
-                {/* Preview Box */}
-                {(previewBlobUrl || draft.imageUrl) ? (
+                  {/* Badge phản ánh trung thực trạng thái của chính ảnh đang hiển thị */}
+                  {candidateImage?.status === 'pending' && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 font-medium">
+                      Ảnh mới đang tải...
+                    </span>
+                  )}
+                  {candidateImage?.status === 'error' && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200 font-medium">
+                      Tải ảnh thất bại
+                    </span>
+                  )}
+                  {candidateImage?.status === 'confirmed' && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Đã xác nhận R2 (Mới)</span>
+                    </span>
+                  )}
+                  {!candidateImage && formMode === 'edit' && initialSavedImage && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Ảnh đã lưu</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Preview Box: tỷ lệ chuẩn 8:3 với object-contain để hiển thị 100% nội dung artwork */}
+                {displayPreviewUrl ? (
                   <div className="space-y-2">
-                    <div className="relative w-full aspect-[16/7] rounded-xl overflow-hidden bg-slate-950 border border-slate-200 flex items-center justify-center">
+                    <div className="relative w-full aspect-[8/3] rounded-xl overflow-hidden bg-slate-950 border border-slate-200 flex items-center justify-center">
                       <img
-                        src={previewBlobUrl || draft.imageUrl}
+                        src={displayPreviewUrl}
                         alt="Banner Preview"
-                        className="w-full h-full object-cover"
+                        className="w-full h-full object-contain object-center"
                       />
                       {isUploading && (
                         <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs flex flex-col items-center justify-center text-white p-4 text-center">
@@ -680,10 +862,11 @@ export const AdminBannersPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="flex items-center justify-between text-xs">
+                    {/* Controls bên dưới ảnh */}
+                    <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
                       <label className="cursor-pointer text-red-600 hover:text-red-700 font-semibold inline-flex items-center gap-1">
                         <UploadCloud className="w-3.5 h-3.5" />
-                        <span>Chọn ảnh khác</span>
+                        <span>{formMode === 'edit' && !candidateImage ? 'Thay ảnh mới' : 'Chọn ảnh khác'}</span>
                         <input
                           type="file"
                           accept=".jpg,.png,.webp,image/jpeg,image/png,image/webp"
@@ -699,11 +882,29 @@ export const AdminBannersPage: React.FC = () => {
                         />
                       </label>
 
-                      {draft.imageObjectKey && (
-                        <span className="text-[11px] text-emerald-600 font-medium inline-flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Đã xác nhận R2</span>
-                        </span>
+                      {/* Nút quay lại ảnh ban đầu khi Edit candidate fail/pending/confirmed */}
+                      {formMode === 'edit' && isCandidateActive && initialSavedImage && (
+                        <button
+                          type="button"
+                          onClick={handleRevertToInitialImage}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 font-semibold text-xs transition-colors"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Giữ ảnh hiện tại</span>
+                        </button>
+                      )}
+
+                      {/* Nút hủy lựa chọn ảnh ở Create mode */}
+                      {formMode === 'create' && isCandidateActive && (
+                        <button
+                          type="button"
+                          onClick={handleClearCandidateInCreate}
+                          disabled={isSaving}
+                          className="text-xs text-slate-500 hover:text-slate-800 font-semibold"
+                        >
+                          Hủy chọn ảnh
+                        </button>
                       )}
                     </div>
                   </div>
@@ -744,10 +945,10 @@ export const AdminBannersPage: React.FC = () => {
                       <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
                       <span className="leading-snug">{uploadError}</span>
                     </div>
-                    {selectedFileForRetry && (
+                    {candidateImage?.file && (
                       <button
                         type="button"
-                        onClick={() => void handleStartImageUpload(selectedFileForRetry)}
+                        onClick={() => void handleStartImageUpload(candidateImage.file)}
                         className="inline-flex items-center gap-1 font-bold text-red-600 hover:underline pt-0.5"
                       >
                         <RefreshCw className="w-3 h-3" />
@@ -774,6 +975,7 @@ export const AdminBannersPage: React.FC = () => {
                   id="banner-target-url"
                   type="text"
                   value={draft.targetUrl}
+                  disabled={isSaving}
                   onChange={(e) => {
                     const val = e.target.value
                     setDraft((prev) => ({ ...prev, targetUrl: val }))
@@ -787,7 +989,7 @@ export const AdminBannersPage: React.FC = () => {
                   }}
                   maxLength={2048}
                   placeholder="/products/intel-core-i5-13400f"
-                  className={`w-full px-3.5 py-2.5 text-xs text-slate-900 font-mono bg-white border rounded-xl outline-none transition ${
+                  className={`w-full px-3.5 py-2.5 text-xs text-slate-900 font-mono bg-white border rounded-xl outline-none transition disabled:bg-slate-50 ${
                     fieldErrors.targetUrl
                       ? 'border-rose-400 bg-rose-50/30 focus:border-rose-600'
                       : 'border-slate-300 focus:border-red-600'
@@ -816,6 +1018,7 @@ export const AdminBannersPage: React.FC = () => {
                     min={0}
                     step={1}
                     value={draft.displayOrder}
+                    disabled={isSaving}
                     onChange={(e) => {
                       const val = Number(e.target.value)
                       setDraft((prev) => ({ ...prev, displayOrder: val }))
@@ -827,7 +1030,7 @@ export const AdminBannersPage: React.FC = () => {
                         })
                       }
                     }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-slate-900 bg-white border rounded-xl outline-none transition ${
+                    className={`w-full px-3.5 py-2.5 text-xs text-slate-900 bg-white border rounded-xl outline-none transition disabled:bg-slate-50 ${
                       fieldErrors.displayOrder
                         ? 'border-rose-400 bg-rose-50/30 focus:border-rose-600'
                         : 'border-slate-300 focus:border-red-600'
@@ -843,10 +1046,11 @@ export const AdminBannersPage: React.FC = () => {
                     <input
                       type="checkbox"
                       checked={draft.isActive}
+                      disabled={isSaving}
                       onChange={(e) =>
                         setDraft((prev) => ({ ...prev, isActive: e.target.checked }))
                       }
-                      className="w-4 h-4 rounded text-red-600 focus:ring-red-500 border-slate-300"
+                      className="w-4 h-4 rounded text-red-600 focus:ring-red-500 border-slate-300 disabled:opacity-50"
                     />
                     <span className="text-xs font-bold text-slate-800">
                       Bật hiển thị
@@ -864,7 +1068,7 @@ export const AdminBannersPage: React.FC = () => {
               <div className="pt-2 flex items-center gap-2">
                 <button
                   type="submit"
-                  disabled={isSaving || isUploading || (!draft.imageObjectKey && formMode === 'create')}
+                  disabled={isSaveDisabled}
                   className="flex-1 inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-colors shadow-md shadow-red-600/25 disabled:opacity-50"
                 >
                   {isSaving ? (
@@ -885,7 +1089,7 @@ export const AdminBannersPage: React.FC = () => {
                     type="button"
                     onClick={handleCancelEdit}
                     disabled={isSaving}
-                    className="px-4 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                    className="px-4 py-2.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
                   >
                     Hủy
                   </button>
@@ -928,7 +1132,7 @@ export const AdminBannersPage: React.FC = () => {
                 type="button"
                 onClick={() => setDeleteTarget(null)}
                 disabled={isDeleting}
-                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors"
+                className="px-4 py-2 border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
                 Hủy bỏ
               </button>
