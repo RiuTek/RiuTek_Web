@@ -872,6 +872,14 @@ export class ProductFilterOptionsCoordinator {
       this.activeAbortController = null
     }
   }
+
+  public clearCache(scopeKey?: string): void {
+    if (scopeKey) {
+      this.inMemoryCache.delete(scopeKey)
+    } else {
+      this.inMemoryCache.clear()
+    }
+  }
 }
 
 /**
@@ -994,38 +1002,172 @@ export function prepareCatalogFilterUpdate({
     }
   }
 
-  const baseMerged: ProductFilterParams = {
-    ...currentFilters,
-    ...newParams,
-    categoryId: nextCategoryId,
-    componentType: nextComponentType,
-  }
-
-  const cleaned = filterApplicableTechnicalFilters(baseMerged, nextComponentType)
-
   const isChangingCategory = nextCategoryId !== (currentFilters.categoryId || undefined)
   const isChangingType = nextComponentType !== (currentFilters.componentType || undefined)
   const shouldResetPage = resetPage || isChangingCategory || isChangingType
 
-  const result: ProductFilterParams = {
-    pageIndex: shouldResetPage ? 1 : (newParams.pageIndex ?? currentFilters.pageIndex ?? 1),
-    pageSize: newParams.pageSize ?? currentFilters.pageSize,
-    sortBy: newParams.sortBy ?? currentFilters.sortBy,
-    searchTerm: newParams.searchTerm !== undefined ? newParams.searchTerm : currentFilters.searchTerm,
-    categoryId: nextCategoryId,
-    componentType: nextComponentType,
-    minPrice: newParams.minPrice !== undefined ? newParams.minPrice : currentFilters.minPrice,
-    maxPrice: newParams.maxPrice !== undefined ? newParams.maxPrice : currentFilters.maxPrice,
-    inStock: newParams.inStock !== undefined ? newParams.inStock : currentFilters.inStock,
-    isActive: newParams.isActive !== undefined ? newParams.isActive : currentFilters.isActive,
-    brands: newParams.brands !== undefined ? newParams.brands : currentFilters.brands,
+  const result: ProductFilterParams = {}
+
+  // 1. Phân trang & sắp xếp
+  if ('pageIndex' in newParams) {
+    if (newParams.pageIndex !== undefined) {
+      result.pageIndex = shouldResetPage ? 1 : newParams.pageIndex
+    }
+  } else {
+    result.pageIndex = shouldResetPage ? 1 : (currentFilters.pageIndex ?? 1)
   }
 
+  if ('pageSize' in newParams) {
+    if (newParams.pageSize !== undefined) result.pageSize = newParams.pageSize
+  } else if (currentFilters.pageSize !== undefined) {
+    result.pageSize = currentFilters.pageSize
+  }
+
+  if ('sortBy' in newParams) {
+    if (newParams.sortBy !== undefined) result.sortBy = newParams.sortBy
+  } else if (currentFilters.sortBy !== undefined) {
+    result.sortBy = currentFilters.sortBy
+  }
+
+  // 2. Category & ComponentType
+  if (nextCategoryId) {
+    result.categoryId = nextCategoryId
+  }
   if (nextComponentType) {
-    const applicableGroups = TECHNICAL_GROUPS_BY_TYPE[nextComponentType] ?? []
-    for (const group of applicableGroups) {
-      if ((cleaned as Record<string, unknown>)[group] !== undefined) {
-        (result as Record<string, unknown>)[group] = (cleaned as Record<string, unknown>)[group]
+    result.componentType = nextComponentType
+  }
+
+  // 3. Search term (undefined hoặc rỗng -> xóa)
+  if ('searchTerm' in newParams) {
+    if (newParams.searchTerm !== undefined && newParams.searchTerm.trim() !== '') {
+      result.searchTerm = newParams.searchTerm.trim()
+    }
+  } else if (currentFilters.searchTerm && currentFilters.searchTerm.trim() !== '') {
+    result.searchTerm = currentFilters.searchTerm.trim()
+  }
+
+  // 4. Giá tối thiểu (0 là giá trị hợp lệ, undefined -> xóa)
+  if ('minPrice' in newParams) {
+    if (
+      newParams.minPrice !== undefined &&
+      Number.isFinite(newParams.minPrice) &&
+      newParams.minPrice >= 0
+    ) {
+      result.minPrice = newParams.minPrice
+    }
+  } else if (
+    currentFilters.minPrice !== undefined &&
+    Number.isFinite(currentFilters.minPrice) &&
+    currentFilters.minPrice >= 0
+  ) {
+    result.minPrice = currentFilters.minPrice
+  }
+
+  // 5. Giá tối đa (0 là giá trị hợp lệ, undefined -> xóa)
+  if ('maxPrice' in newParams) {
+    if (
+      newParams.maxPrice !== undefined &&
+      Number.isFinite(newParams.maxPrice) &&
+      newParams.maxPrice >= 0
+    ) {
+      result.maxPrice = newParams.maxPrice
+    }
+  } else if (
+    currentFilters.maxPrice !== undefined &&
+    Number.isFinite(currentFilters.maxPrice) &&
+    currentFilters.maxPrice >= 0
+  ) {
+    result.maxPrice = currentFilters.maxPrice
+  }
+
+  // 6. inStock (boolean false là hợp lệ, undefined -> xóa)
+  if ('inStock' in newParams) {
+    if (typeof newParams.inStock === 'boolean') {
+      result.inStock = newParams.inStock
+    }
+  } else if (typeof currentFilters.inStock === 'boolean') {
+    result.inStock = currentFilters.inStock
+  }
+
+  // 7. isActive (boolean false là hợp lệ, undefined -> xóa)
+  if ('isActive' in newParams) {
+    if (typeof newParams.isActive === 'boolean') {
+      result.isActive = newParams.isActive
+    }
+  } else if (typeof currentFilters.isActive === 'boolean') {
+    result.isActive = currentFilters.isActive
+  }
+
+  // 8. Brands (mảng rỗng hoặc undefined -> xóa)
+  if ('brands' in newParams) {
+    if (Array.isArray(newParams.brands) && newParams.brands.length > 0) {
+      result.brands = newParams.brands
+    }
+  } else if (Array.isArray(currentFilters.brands) && currentFilters.brands.length > 0) {
+    result.brands = currentFilters.brands
+  }
+
+  // 9. Technical filters (chỉ áp dụng cho nextComponentType)
+  if (nextComponentType) {
+    const applicableGroups = new Set(TECHNICAL_GROUPS_BY_TYPE[nextComponentType] ?? [])
+
+    const techArrayKeys = [
+      'sockets',
+      'memoryTypes',
+      'motherboardFormFactors',
+      'ramFormFactors',
+      'storageTypes',
+      'storageInterfaces',
+      'psuEfficiencies',
+      'psuModularities',
+      'psuFormFactors',
+      'coolerTypes',
+      'coreCounts',
+      'vramGbs',
+      'gpuLengthsMm',
+      'ramCapacitiesGb',
+      'ramSpeedsMhz',
+      'storageCapacitiesGb',
+      'psuWattages',
+    ] as const
+
+    for (const key of techArrayKeys) {
+      if (applicableGroups.has(key)) {
+        if (key in newParams) {
+          const val = (newParams as Record<string, unknown>)[key]
+          if (Array.isArray(val) && val.length > 0) {
+            ;(result as Record<string, unknown>)[key] = val
+          }
+        } else {
+          const val = (currentFilters as unknown as Record<string, unknown>)[key]
+          if (Array.isArray(val) && val.length > 0) {
+            ;(result as Record<string, unknown>)[key] = val
+          }
+        }
+      }
+    }
+
+    const techBoolKeys = [
+      'hasIntegratedGpu',
+      'hasWifi',
+      'hasRgb',
+      'has12VHPWR',
+      'requires12VHPWR',
+    ] as const
+
+    for (const key of techBoolKeys) {
+      if (applicableGroups.has(key)) {
+        if (key in newParams) {
+          const val = (newParams as Record<string, unknown>)[key]
+          if (typeof val === 'boolean') {
+            ;(result as Record<string, unknown>)[key] = val
+          }
+        } else {
+          const val = (currentFilters as unknown as Record<string, unknown>)[key]
+          if (typeof val === 'boolean') {
+            ;(result as Record<string, unknown>)[key] = val
+          }
+        }
       }
     }
   }

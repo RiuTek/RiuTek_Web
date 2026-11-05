@@ -19,10 +19,13 @@ export const ProductsPage: React.FC = () => {
     categories,
     isCategoriesLoading,
     categoriesError,
+    isResolvingCategory,
     isLoading,
     error,
     priceError,
     overflowError,
+    invalidCategoryError,
+    categoryNotFoundError,
     limitWarning,
     filters,
     effectiveComponentType,
@@ -35,6 +38,7 @@ export const ProductsPage: React.FC = () => {
     setPage,
     resetFilters,
     retry,
+    retryCategories,
     retryFilterOptions,
   } = useProductCatalog()
 
@@ -129,7 +133,19 @@ export const ProductsPage: React.FC = () => {
           {/* Top Results Bar */}
           <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
             <div className="text-xs text-slate-600 font-medium">
-              {pagedResult ? (
+              {isLoading || isResolvingCategory ? (
+                <span>Đang tải thông tin sản phẩm...</span>
+              ) : categoriesError && filters.categoryId ? (
+                <span className="text-rose-600 font-semibold">Lỗi tải danh mục</span>
+              ) : invalidCategoryError || categoryNotFoundError ? (
+                <span className="text-rose-600 font-semibold">Danh mục không hợp lệ</span>
+              ) : priceError ? (
+                <span className="text-rose-600 font-semibold">Lỗi khoảng giá</span>
+              ) : overflowError ? (
+                <span className="text-rose-600 font-semibold">Lỗi giới hạn bộ lọc</span>
+              ) : error ? (
+                <span className="text-rose-600 font-semibold">Không thể tải dữ liệu</span>
+              ) : pagedResult ? (
                 <span>
                   Tìm thấy{' '}
                   <strong className="text-slate-950 font-bold font-mono">
@@ -167,8 +183,43 @@ export const ProductsPage: React.FC = () => {
           </div>
 
           {/* Conditional Grid State */}
-          {isLoading ? (
+          {isLoading || isResolvingCategory ? (
             <ProductGridSkeleton />
+          ) : categoriesError && filters.categoryId ? (
+            <ProductGridError
+              title="Lỗi Tải Danh Mục"
+              message="Không thể tải danh sách danh mục từ máy chủ. Vui lòng thử lại."
+              actionLabel="Thử Lại"
+              onRetry={retryCategories}
+            />
+          ) : invalidCategoryError ? (
+            <ProductGridError
+              title="Mã Danh Mục Không Hợp Lệ"
+              message={invalidCategoryError}
+              actionLabel="Xóa Danh Mục"
+              onRetry={() => updateFilters({ categoryId: undefined })}
+            />
+          ) : categoryNotFoundError ? (
+            <ProductGridError
+              title="Không Tìm Thấy Danh Mục"
+              message={categoryNotFoundError}
+              actionLabel="Xem Tất Cả Sản Phẩm"
+              onRetry={() => updateFilters({ categoryId: undefined })}
+            />
+          ) : priceError ? (
+            <ProductGridError
+              title="Khoảng Giá Không Hợp Lệ"
+              message={priceError}
+              actionLabel="Xóa Bộ Lọc Giá"
+              onRetry={() => updateFilters({ minPrice: undefined, maxPrice: undefined })}
+            />
+          ) : overflowError ? (
+            <ProductGridError
+              title="Giới Hạn Bộ Lọc"
+              message={overflowError}
+              actionLabel="Đặt Lại Bộ Lọc"
+              onRetry={resetFilters}
+            />
           ) : error ? (
             <ProductGridError error={error} onRetry={retry} />
           ) : products.length === 0 ? (

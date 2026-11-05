@@ -30,18 +30,26 @@ export const ProductGridSkeleton: React.FC = () => {
 }
 
 interface ProductGridErrorProps {
-  error: ApiError | Error | null
+  error?: ApiError | Error | null
+  title?: string
+  message?: string
+  actionLabel?: string
   onRetry: () => void
 }
 
 export const ProductGridError: React.FC<ProductGridErrorProps> = ({
   error,
+  title,
+  message,
+  actionLabel = 'Thử Lại',
   onRetry,
 }) => {
+  const displayTitle = title || 'Không Thể Tải Dữ Liệu'
   const displayMessage =
-    error instanceof ApiError
+    message ||
+    (error instanceof ApiError
       ? error.message
-      : error?.message || 'Không thể tải danh sách sản phẩm lúc này. Vui lòng thử lại.'
+      : error?.message || 'Không thể tải danh sách sản phẩm lúc này. Vui lòng thử lại.')
 
   return (
     <div className="bg-white p-8 sm:p-12 rounded-2xl border border-slate-200 text-center max-w-lg mx-auto my-8">
@@ -49,7 +57,7 @@ export const ProductGridError: React.FC<ProductGridErrorProps> = ({
         <AlertCircle className="w-6 h-6" />
       </div>
       <h3 className="text-base font-bold text-slate-900 mb-2">
-        Không Thể Tải Dữ Liệu
+        {displayTitle}
       </h3>
       <p className="text-xs sm:text-sm text-slate-600 mb-6 leading-relaxed">
         {displayMessage}
@@ -60,7 +68,7 @@ export const ProductGridError: React.FC<ProductGridErrorProps> = ({
         className="inline-flex items-center gap-2 px-5 py-2.5 bg-red-600 text-white rounded-xl text-xs font-bold hover:bg-red-700 transition-colors shadow-xs"
       >
         <RotateCcw className="w-3.5 h-3.5" />
-        <span>Thử Lại</span>
+        <span>{actionLabel}</span>
       </button>
     </div>
   )

@@ -25,8 +25,6 @@ import {
 } from '../productFilterHelper'
 import { getCategories } from '../productApi'
 
-const optionsCoordinator = new ProductFilterOptionsCoordinator()
-
 interface HomeCategoryMenuProps {
   initialCategories?: Category[]
 }
@@ -59,26 +57,47 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
   initialCategories,
 }) => {
   const [fetchedCategories, setFetchedCategories] = useState<Category[]>([])
-  const [isLoadingCats, setIsLoadingCats] = useState(!initialCategories || initialCategories.length === 0)
-  const categories = initialCategories && initialCategories.length > 0 ? initialCategories : fetchedCategories
+  const [isLoadingCats, setIsLoadingCats] = useState(
+    !initialCategories || initialCategories.length === 0
+  )
+  const [categoriesError, setCategoriesError] = useState<Error | null>(null)
+  const [categoriesRetryCount, setCategoriesRetryCount] = useState(0)
+  const categories =
+    initialCategories && initialCategories.length > 0
+      ? initialCategories
+      : fetchedCategories
 
   const [activeCategory, setActiveCategory] = useState<Category | null>(null)
   const [mobileExpandedCatId, setMobileExpandedCatId] = useState<string | null>(null)
 
-  // Flyout options state (desktop)
-  const [panelOptions, setPanelOptions] = useState<ProductFilterOptionsResponse | null>(null)
-  const [isLoadingOptions, setIsLoadingOptions] = useState(false)
-  const [optionsError, setOptionsError] = useState<Error | null>(null)
+  // Coordinators riêng biệt cho Desktop và Mobile để không hủy request lẫn nhau
+  const [desktopCoordinator] = useState(() => new ProductFilterOptionsCoordinator())
+  const [mobileCoordinator] = useState(() => new ProductFilterOptionsCoordinator())
+
+  // Flyout options state (desktop theo map từng categoryId để không bao giờ bị stale brands)
+  const [desktopOptionsMap, setDesktopOptionsMap] = useState<
+    Record<
+      string,
+      { data: ProductFilterOptionsResponse | null; isLoading: boolean; error: Error | null }
+    >
+  >({})
+  const [desktopRetryCount, setDesktopRetryCount] = useState(0)
+
+  const activeDesktopEntry = activeCategory ? desktopOptionsMap[activeCategory.id] : null
+  const panelOptions = activeDesktopEntry?.data ?? null
+  const isLoadingOptions = activeDesktopEntry?.isLoading ?? false
+  const optionsError = activeDesktopEntry?.error ?? null
 
   // Mobile options state
   const [mobileBrandsMap, setMobileBrandsMap] = useState<
     Record<string, { brands: string[]; isLoading: boolean; error: Error | null }>
   >({})
+  const [mobileRetryMap, setMobileRetryMap] = useState<Record<string, number>>({})
 
   const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuContainerRef = useRef<HTMLDivElement | null>(null)
 
-  // 1. Nạp categories nếu chưa có
+  // 1. Nạp categories nếu chưa có (có hỗ trợ retry khi lỗi)
   useEffect(() => {
     if (initialCategories && initialCategories.length > 0) {
       return
@@ -91,9 +110,11 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       .then((data) => {
         if (!isMounted) return
         setFetchedCategories(data)
+        setCategoriesError(null)
       })
-      .catch(() => {
-        // Menu lỗi không chặn trang chủ
+      .catch((err) => {
+        if (!isMounted) return
+        setCategoriesError(err instanceof Error ? err : new Error(String(err)))
       })
       .finally(() => {
         if (isMounted) setIsLoadingCats(false)
@@ -103,13 +124,17 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       isMounted = false
       controller.abort()
     }
-  }, [initialCategories])
+  }, [initialCategories, categoriesRetryCount])
+
+  const handleRetryCategories = () => {
+    setIsLoadingCats(true)
+    setCategoriesError(null)
+    setCategoriesRetryCount((prev) => prev + 1)
+  }
 
   // 2. Nạp lazy filter options cho activeCategory (desktop)
   useEffect(() => {
-    if (!activeCategory) {
-      return
-    }
+    if (!activeCategory) return
 
     let isMounted = true
     const targetCat = activeCategory
@@ -118,22 +143,34 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       categoryId: targetCat.id,
     }
 
-    optionsCoordinator.loadOptions(
+    desktopCoordinator.loadOptions(
       scope,
       (data) => {
-        if (isMounted && activeCategory?.id === targetCat.id) {
-          setPanelOptions(data)
-          setOptionsError(null)
+        if (isMounted) {
+          setDesktopOptionsMap((prev) => ({
+            ...prev,
+            [targetCat.id]: { data, isLoading: false, error: null },
+          }))
         }
       },
       (err) => {
-        if (isMounted && activeCategory?.id === targetCat.id) {
-          setOptionsError(err)
+        if (isMounted) {
+          setDesktopOptionsMap((prev) => ({
+            ...prev,
+            [targetCat.id]: { data: null, isLoading: false, error: err },
+          }))
         }
       },
       (loading) => {
-        if (isMounted && activeCategory?.id === targetCat.id) {
-          setIsLoadingOptions(loading)
+        if (isMounted) {
+          setDesktopOptionsMap((prev) => ({
+            ...prev,
+            [targetCat.id]: {
+              data: prev[targetCat.id]?.data ?? null,
+              isLoading: loading,
+              error: loading ? null : (prev[targetCat.id]?.error ?? null),
+            },
+          }))
         }
       }
     )
@@ -141,15 +178,30 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
     return () => {
       isMounted = false
     }
-  }, [activeCategory])
+  }, [activeCategory, desktopCoordinator, desktopRetryCount])
 
-  // 3. Nạp lazy filter options cho mobile category khi được mở
+  const handleRetryDesktop = () => {
+    if (!activeCategory) return
+    desktopCoordinator.clearCache(
+      desktopCoordinator.getScopeKey({
+        componentType: activeCategory.componentType,
+        categoryId: activeCategory.id,
+      })
+    )
+    const catId = activeCategory.id
+    setDesktopOptionsMap((prev) => {
+      const copy = { ...prev }
+      delete copy[catId]
+      return copy
+    })
+    setDesktopRetryCount((prev) => prev + 1)
+  }
+
+  // 3. Nạp lazy filter options cho mobile category khi được mở (khắc phục self-invalidation)
   useEffect(() => {
     if (!mobileExpandedCatId) return
     const targetCat = categories.find((c) => c.id === mobileExpandedCatId)
     if (!targetCat) return
-
-    if (mobileBrandsMap[targetCat.id]) return
 
     let isMounted = true
     const scope = {
@@ -157,7 +209,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
       categoryId: targetCat.id,
     }
 
-    optionsCoordinator.loadOptions(
+    mobileCoordinator.loadOptions(
       scope,
       (data) => {
         if (isMounted) {
@@ -180,8 +232,9 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
           setMobileBrandsMap((prev) => ({
             ...prev,
             [targetCat.id]: {
-              ...(prev[targetCat.id] ?? { brands: [], error: null }),
+              brands: prev[targetCat.id]?.brands ?? [],
               isLoading: loading,
+              error: loading ? null : (prev[targetCat.id]?.error ?? null),
             },
           }))
         }
@@ -191,7 +244,28 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
     return () => {
       isMounted = false
     }
-  }, [mobileExpandedCatId, categories, mobileBrandsMap])
+  }, [mobileExpandedCatId, categories, mobileCoordinator, mobileRetryMap])
+
+  const handleRetryMobile = (catId: string) => {
+    const targetCat = categories.find((c) => c.id === catId)
+    if (targetCat) {
+      mobileCoordinator.clearCache(
+        mobileCoordinator.getScopeKey({
+          componentType: targetCat.componentType,
+          categoryId: targetCat.id,
+        })
+      )
+    }
+    setMobileBrandsMap((prev) => {
+      const copy = { ...prev }
+      delete copy[catId]
+      return copy
+    })
+    setMobileRetryMap((prev) => ({
+      ...prev,
+      [catId]: (prev[catId] ?? 0) + 1,
+    }))
+  }
 
   // Mouse hover logic với vùng đệm chống mouseleave bất ngờ
   const handleMouseEnterRoot = (cat: Category) => {
@@ -236,7 +310,7 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
     <div
       ref={menuContainerRef}
       onMouseLeave={handleMouseLeaveRootOrPanel}
-      className="relative w-full bg-white rounded-3xl border border-slate-200/90 shadow-sm z-30"
+      className="relative lg:static w-full bg-white rounded-3xl border border-slate-200/90 shadow-sm z-30"
     >
       {/* Menu Header */}
       <div className="flex items-center gap-2 p-4 border-b border-slate-100">
@@ -256,13 +330,27 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
           </div>
         )}
 
-        {!isLoadingCats && categories.length === 0 && (
+        {categoriesError && (
+          <div className="p-4 text-center space-y-2">
+            <p className="text-xs text-rose-600 font-medium">Không thể nạp danh mục</p>
+            <button
+              type="button"
+              onClick={handleRetryCategories}
+              className="px-3 py-1 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700 transition-colors"
+            >
+              Thử lại
+            </button>
+          </div>
+        )}
+
+        {!isLoadingCats && !categoriesError && categories.length === 0 && (
           <div className="p-4 text-xs text-slate-400 italic text-center">
             Chưa có danh mục sản phẩm
           </div>
         )}
 
         {!isLoadingCats &&
+          !categoriesError &&
           categories.map((cat) => {
             const isHovered = activeCategory?.id === cat.id
             const isMobileExpanded = mobileExpandedCatId === cat.id
@@ -357,8 +445,19 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
                         )}
                       </div>
 
-                      {mobileBrandsMap[cat.id]?.brands &&
-                      mobileBrandsMap[cat.id].brands.length > 0 ? (
+                      {mobileBrandsMap[cat.id]?.error ? (
+                        <div className="flex items-center justify-between p-2 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-[11px]">
+                          <span>Không nạp được thương hiệu</span>
+                          <button
+                            type="button"
+                            onClick={() => handleRetryMobile(cat.id)}
+                            className="px-2 py-0.5 bg-red-600 text-white rounded font-bold hover:bg-red-700 transition-colors"
+                          >
+                            Thử lại
+                          </button>
+                        </div>
+                      ) : mobileBrandsMap[cat.id]?.brands &&
+                        mobileBrandsMap[cat.id].brands.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5">
                           {mobileBrandsMap[cat.id].brands.map((b) => {
                             const query = buildProductFilterSearchParams({
@@ -390,13 +489,13 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
           })}
       </div>
 
-      {/* Mega Menu Panel bên phải trên Desktop */}
+      {/* Mega Menu Panel bên phải trên Desktop: bám theo content container của HomePage */}
       {activeCategory && (
         <div
           id="desktop-category-flyout-panel"
           onMouseEnter={handleMouseEnterPanel}
           onMouseLeave={handleMouseLeaveRootOrPanel}
-          className="hidden lg:flex flex-col absolute left-full top-0 ml-6 w-[720px] xl:w-[940px] max-w-[calc(100vw-340px)] max-h-[calc(100vh-160px)] min-h-[380px] bg-white rounded-3xl border border-slate-200/90 shadow-2xl p-6 sm:p-8 z-40 overflow-y-auto animate-in fade-in-50 zoom-in-95 duration-150"
+          className="hidden lg:flex flex-col absolute left-[calc(16rem+1.5rem)] right-0 top-0 max-h-[calc(100vh-160px)] min-h-[380px] bg-white rounded-3xl border border-slate-200/90 shadow-2xl p-6 sm:p-8 z-40 overflow-y-auto before:absolute before:-left-6 before:top-0 before:w-6 before:h-full before:content-[''] animate-in fade-in-50 zoom-in-95 duration-150"
         >
           {/* Header Panel */}
           <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-100">
@@ -457,8 +556,15 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
               </div>
 
               {optionsError && (
-                <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-500 italic">
-                  Không nạp được danh sách thương hiệu. Vui lòng bấm &quot;Xem tất cả&quot; để mở catalog.
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-center justify-between">
+                  <span>Không nạp được danh sách thương hiệu.</span>
+                  <button
+                    type="button"
+                    onClick={handleRetryDesktop}
+                    className="px-2.5 py-1 bg-red-600 text-white rounded-lg text-xs font-bold hover:bg-red-700"
+                  >
+                    Thử lại
+                  </button>
                 </div>
               )}
 
