@@ -6,6 +6,7 @@ import {
   ClipboardList,
   FileSpreadsheet,
   FolderTree,
+  Image as ImageIcon,
   LogOut,
   Menu,
   Package,
@@ -63,6 +64,13 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: 'Quản lý danh mục',
     description: 'Cây danh mục & phân loại',
     icon: FolderTree,
+    end: true,
+  },
+  {
+    to: '/admin/banners',
+    label: 'Quản lý banner',
+    description: 'Banner quảng cáo & trang chủ',
+    icon: ImageIcon,
     end: true,
   },
 ]

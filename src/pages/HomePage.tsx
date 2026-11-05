@@ -1,161 +1,147 @@
-import React from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Sparkles,
   ArrowRight,
   Cpu,
-  Layers,
-  Zap,
   PackageCheck,
   CheckCircle2,
   SlidersHorizontal,
   Flame,
   Gauge,
   HelpCircle,
+  ShieldCheck,
 } from 'lucide-react'
-import {
-  CATEGORIES_DATA,
-  FEATURED_PRODUCTS_DATA,
-  SERVICE_BENEFITS,
-} from '../data/homeMockData'
+import type { Category } from '../features/products/productTypes'
+import { getCategories } from '../features/products/productApi'
 import { HomeCategoryMenu } from '../features/products/components/HomeCategoryMenu'
+import { HomeBannerCarousel } from '../features/banners/components/HomeBannerCarousel'
+import { HomeCategoryProductRows } from '../features/products/components/HomeCategoryProductRows'
 
 export const HomePage: React.FC = () => {
+  // Quản lý categories ở cấp HomePage để chia sẻ đồng bộ giữa Menu và các Rows sản phẩm
+  const [categories, setCategories] = useState<Category[]>([])
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true)
+  const [categoriesError, setCategoriesError] = useState<Error | null>(null)
+  const [categoriesRetryCount, setCategoriesRetryCount] = useState(0)
+
+  useEffect(() => {
+    let isMounted = true
+    const controller = new AbortController()
+
+    getCategories(controller.signal)
+      .then((data) => {
+        if (!isMounted) return
+        setCategories(Array.isArray(data) ? data : [])
+        setCategoriesError(null)
+      })
+      .catch((err: unknown) => {
+        if (!isMounted) return
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setCategoriesError(err instanceof Error ? err : new Error(String(err)))
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingCategories(false)
+      })
+
+    return () => {
+      isMounted = false
+      controller.abort()
+    }
+  }, [categoriesRetryCount])
+
+  const handleRetryCategories = useCallback(() => {
+    setIsLoadingCategories(true)
+    setCategoriesError(null)
+    setCategoriesRetryCount((c) => c + 1)
+  }, [])
+
+  // Danh mục GỐC (parentId === null hoặc rỗng theo contract Category)
+  const rootCategories = useMemo(() => {
+    if (!Array.isArray(categories) || categories.length === 0) return []
+    return categories.filter((cat) => !cat.parentId || cat.parentId.trim() === '')
+  }, [categories])
+
   return (
     <div className="w-full flex flex-col space-y-12 sm:space-y-16 pb-16">
-      {/* 1. HERO SECTION: Category Menu + Editorial Hero Split */}
+      {/* 1. HERO SECTION:
+          Desktop: [Danh mục gốc ~256px] [Banner carousel lớn chiếm phần chính] [Giới thiệu PC Builder gọn]
+          Mobile/Tablet: Banner TRƯỚC khối giới thiệu và list danh mục dài (menu truy cập được ngay sau banner)
+      */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-10">
         <div className="flex flex-col lg:flex-row gap-6 items-start relative">
-          {/* Left: Home Category Menu (Desktop ~256px, hover flyout panel) */}
-          <div className="w-full lg:w-64 flex-shrink-0">
-            <HomeCategoryMenu />
+          {/* Menu Danh Mục Linh Kiện: Desktop ở cột trái (256px), Mobile hiển thị ngay sau Banner (order-2) */}
+          <div className="w-full lg:w-64 flex-shrink-0 order-2 lg:order-1">
+            <HomeCategoryMenu
+              initialCategories={categories}
+              isLoadingCategories={isLoadingCategories}
+              categoriesError={categoriesError}
+              onRetryCategories={handleRetryCategories}
+            />
           </div>
 
-          {/* Right: Hero Banners */}
-          <div className="flex-1 min-w-0 grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-            {/* Content Column */}
-            <div className="lg:col-span-7 bg-white p-6 sm:p-8 lg:p-10 rounded-3xl shadow-[0_12px_40px_rgba(220,38,38,0.06)] border border-red-100/70 flex flex-col justify-between relative overflow-hidden">
-              <div className="absolute -right-20 -top-20 w-72 h-72 bg-red-100/40 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -left-20 -bottom-20 w-72 h-72 bg-slate-100/60 rounded-full blur-3xl pointer-events-none" />
+          {/* Banner Carousel: Lớn, chiếm phần chính trên Desktop; hiển thị ĐẦU TIÊN trên Mobile (order-1) */}
+          <div className="w-full lg:flex-1 min-w-0 order-1 lg:order-2">
+            <HomeBannerCarousel />
+          </div>
 
-              <div className="relative z-10">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-red-50 border border-red-200/80 rounded-full mb-6 shadow-sm">
-                  <Flame className="w-4 h-4 text-red-600" />
-                  <span className="text-xs font-extrabold text-red-600 uppercase tracking-wider">
-                    Hệ Sinh Thái Phần Cứng PC
-                  </span>
-                </div>
+          {/* Khối Giới Thiệu PC Builder Gọn: Desktop ở cột phải; Mobile hiển thị sau Menu (order-3) */}
+          <div className="w-full lg:w-72 xl:w-80 flex-shrink-0 order-3 lg:order-3 bg-white p-6 sm:p-7 rounded-3xl shadow-[0_12px_40px_rgba(220,38,38,0.06)] border border-red-100/70 flex flex-col justify-between relative overflow-hidden min-h-[300px] lg:min-h-[380px]">
+            <div className="absolute -right-16 -top-16 w-56 h-56 bg-red-100/40 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -left-16 -bottom-16 w-56 h-56 bg-slate-100/60 rounded-full blur-3xl pointer-events-none" />
 
-                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-950 tracking-tight mb-4 leading-tight">
-                  Kỷ nguyên hiệu năng PC: Khám phá{' '}
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-red-600 via-red-500 to-rose-700">
-                    Phần Cứng Đỉnh Cao
-                  </span>{' '}
-                  &amp; Tối Ưu Cấu Hình.
-                </h1>
-
-                <p className="text-sm sm:text-base text-slate-600 max-w-xl mb-6 leading-relaxed">
-                  Nền tảng thương mại điện tử linh kiện máy tính, hệ thống PC Gaming và máy trạm AI. Hỗ trợ người dùng từ cơ bản đến chuyên sâu dễ dàng lựa chọn linh kiện tương thích và cân bằng hiệu năng.
-                </p>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <Link
-                    to="/pc-builder"
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-full text-xs sm:text-sm font-bold shadow-lg shadow-red-600/25 hover:shadow-red-600/40 transition-all transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span>Khám Phá PC Builder</span>
-                  </Link>
-
-                  <Link
-                    to="/products"
-                    className="inline-flex items-center gap-2 px-5 py-3 bg-slate-100 text-slate-900 rounded-full text-xs sm:text-sm font-semibold hover:bg-red-50 hover:text-red-600 transition-all border border-slate-200 hover:border-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
-                  >
-                    <span>Xem Danh Mục</span>
-                    <ArrowRight className="w-4 h-4" />
-                  </Link>
-                </div>
-              </div>
-
-              {/* Telemetry Spec Footnote */}
-              <div className="relative z-10 pt-5 mt-6 border-t border-slate-100 grid grid-cols-3 gap-2 text-slate-600">
-                <div>
-                  <div className="text-sm sm:text-base font-bold text-slate-950 font-mono">Đồng bộ</div>
-                  <div className="text-[11px] text-slate-500">Chuẩn form factor</div>
-                </div>
-                <div>
-                  <div className="text-sm sm:text-base font-bold text-red-600 font-mono">Trực quan</div>
-                  <div className="text-[11px] text-slate-500">Kiểm tra tương thích</div>
-                </div>
-                <div>
-                  <div className="text-sm sm:text-base font-bold text-slate-950 font-mono">Tối ưu</div>
-                  <div className="text-[11px] text-slate-500">Cân đối ngân sách</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right Visual Feature Column */}
-            <div className="lg:col-span-5 flex flex-col gap-4">
-              {/* Flagship Hardware Preview Card */}
-              <div className="flex-1 bg-slate-900 rounded-3xl border border-red-100/40 relative overflow-hidden flex flex-col justify-between group min-h-[280px] p-6 shadow-sm">
-              <img
-                src={FEATURED_PRODUCTS_DATA[0].imageUrl}
-                alt="Flagship Hardware Preview"
-                className="w-full h-full object-cover rounded-2xl absolute inset-0 opacity-80 group-hover:scale-105 transition-transform duration-700"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/50 to-transparent pointer-events-none" />
-
-              <div className="relative z-10 flex justify-between items-start">
-                <span className="px-3 py-1 bg-red-600 text-white text-xs font-bold rounded-full shadow-md">
-                  RIUTEK APEX
-                </span>
-                <span className="px-3 py-1 bg-slate-950/80 backdrop-blur-md text-white text-xs font-mono rounded-full border border-white/20">
-                  TDP: 450W Max
+            <div className="relative z-10">
+              <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-50 border border-red-200/80 rounded-full mb-4 shadow-xs">
+                <Flame className="w-3.5 h-3.5 text-red-600" />
+                <span className="text-[11px] font-extrabold text-red-600 uppercase tracking-wider">
+                  Cấu Hình PC
                 </span>
               </div>
 
-              <div className="relative z-10 text-white mt-auto pt-16">
-                <p className="text-xs text-red-400 uppercase tracking-widest font-bold mb-1">
-                  Kiến Trúc Đồ Họa Next-Gen
-                </p>
-                <h2 className="text-xl font-bold text-white mb-1">
-                  Hệ Thống Tản Nhiệt Đa Tầng &amp; GDDR7
-                </h2>
-                <p className="text-xs text-slate-300 line-clamp-2">
-                  Tối ưu hóa luồng gió khí động học, chuẩn PCIe Gen 5 và băng thông bộ nhớ đồ họa tốc độ cao cho gaming 4K và huấn luyện mô hình.
-                </p>
+              <h2 className="text-xl sm:text-2xl font-extrabold text-slate-950 tracking-tight mb-3 leading-snug">
+                Tự chọn cấu hình PC phù hợp
+              </h2>
+
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed mb-6">
+                Tối ưu hóa dàn máy theo ngân sách và nhu cầu thực tế. Đối chiếu chuẩn socket, công suất nguồn và kích thước linh kiện trực quan.
+              </p>
+
+              <div className="flex flex-col gap-2.5">
+                <Link
+                  to="/pc-builder"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-gradient-to-r from-red-600 to-red-700 text-white rounded-full text-xs sm:text-sm font-bold shadow-md shadow-red-600/25 hover:shadow-red-600/40 transition-all transform hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>Trải Nghiệm PC Builder</span>
+                </Link>
+
+                <Link
+                  to="/products"
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-slate-100 text-slate-800 rounded-full text-xs font-semibold hover:bg-red-50 hover:text-red-600 transition-colors border border-slate-200"
+                >
+                  <span>Xem Toàn Bộ Linh Kiện</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
               </div>
             </div>
 
-            {/* Quick Spec Highlights */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-red-50 text-red-600 flex items-center justify-center flex-shrink-0">
-                  <Cpu className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900">Z890 &amp; X870E</div>
-                  <div className="text-[11px] text-slate-500">Bo mạch chủ thế hệ mới</div>
-                </div>
+            {/* Thông số tham chiếu thực tế */}
+            <div className="relative z-10 pt-4 mt-6 border-t border-slate-100 grid grid-cols-2 gap-2 text-slate-600 text-xs">
+              <div>
+                <div className="font-bold text-slate-950 font-mono text-xs">Đồng bộ</div>
+                <div className="text-[10px] text-slate-500">Chuẩn form factor</div>
               </div>
-
-              <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-slate-900 text-red-400 flex items-center justify-center flex-shrink-0">
-                  <Zap className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-bold text-slate-900">PCIe Gen 5 NVMe</div>
-                  <div className="text-[11px] text-slate-500">Tốc độ đọc 14.500 MB/s</div>
-                </div>
+              <div>
+                <div className="font-bold text-red-600 font-mono text-xs">Trực quan</div>
+                <div className="text-[10px] text-slate-500">Đối chiếu socket &amp; TDP</div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-        {/* 3 Core Architecture Values */}
+        {/* 3 Giá trị cốt lõi nền tảng */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-start gap-3.5 hover:border-red-200 transition-colors">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-2xs flex items-start gap-3.5 hover:border-red-200 transition-colors">
             <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 flex-shrink-0">
               <SlidersHorizontal className="w-5 h-5" />
             </div>
@@ -164,12 +150,12 @@ export const HomePage: React.FC = () => {
                 Kiểm Tra Tương Thích
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Đồng bộ chuẩn socket, kích thước khe cắm và công suất nguồn tránh rủi ro nghẽn cổ chai phần cứng.
+                Đồng bộ chuẩn socket, kích thước khe cắm và công suất nguồn tránh rủi ro không tương thích phần cứng.
               </p>
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-start gap-3.5 hover:border-red-200 transition-colors">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-2xs flex items-start gap-3.5 hover:border-red-200 transition-colors">
             <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 flex-shrink-0">
               <Gauge className="w-5 h-5" />
             </div>
@@ -183,75 +169,35 @@ export const HomePage: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-sm flex items-start gap-3.5 hover:border-red-200 transition-colors">
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/70 shadow-2xs flex items-start gap-3.5 hover:border-red-200 transition-colors">
             <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 flex-shrink-0">
               <HelpCircle className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-sm font-bold text-slate-900 mb-1">
-                Hỗ Trợ Người Mới Tự Lắp Ráp
+                Hỗ Trợ Tự Lắp Ráp Máy Tính
               </h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Mô tả thông số mạch lạc, dễ hiểu, giúp người dùng không chuyên vẫn tự tin lựa chọn cấu hình máy tính riêng.
+                Mô tả thông số mạch lạc, dễ hiểu, giúp người dùng tự tin tìm hiểu và lựa chọn cấu hình máy tính riêng.
               </p>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 2. CATEGORY CARDS SECTION */}
-      <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
-          <div>
-            <div className="text-xs font-bold uppercase tracking-wider text-red-600 mb-1">
-              Phần Cứng Chuyên Sâu
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
-              Danh Mục Linh Kiện Chính
-            </h2>
-          </div>
-          <Link
-            to="/products"
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-red-600 hover:text-red-700 transition-colors"
-          >
-            <span>Xem toàn bộ linh kiện</span>
-            <ArrowRight className="w-4 h-4" />
-          </Link>
-        </div>
+      {/* 2. DÃY SẢN PHẨM THẬT THEO DANH MỤC GỐC TỪ BACKEND
+          Thay thế danh mục cards lặp lại và sản phẩm nổi bật mẫu
+      */}
+      <HomeCategoryProductRows
+        rootCategories={rootCategories}
+        isLoadingCategories={isLoadingCategories}
+        categoriesError={categoriesError}
+        onRetryCategories={handleRetryCategories}
+      />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {CATEGORIES_DATA.map((cat) => (
-            <Link
-              key={cat.id}
-              to="/products"
-              className="bg-white p-6 rounded-2xl border border-slate-200/80 shadow-sm hover:border-red-300 hover:shadow-md transition-all group flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-700 group-hover:bg-red-50 group-hover:text-red-600 group-hover:border-red-200 transition-colors">
-                    <Layers className="w-5 h-5" />
-                  </div>
-                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-medium font-mono">
-                    {cat.itemCount}
-                  </span>
-                </div>
-                <h3 className="text-base font-bold text-slate-900 group-hover:text-red-600 transition-colors mb-1.5">
-                  {cat.name}
-                </h3>
-                <p className="text-xs text-slate-500 leading-relaxed mb-4">
-                  {cat.description}
-                </p>
-              </div>
-              <div className="inline-flex items-center gap-1 text-xs font-semibold text-slate-700 group-hover:text-red-600 transition-colors pt-2 border-t border-slate-100">
-                <span>Khám phá nhóm linh kiện</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      {/* 3. QUICK PC BUILDER INTRO WIDGET */}
+      {/* 3. KHU VỰC GIỚI THIỆU PC BUILDER CHI TIẾT
+          Các bước cấu hình mạch lạc, trung thực
+      */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white rounded-3xl p-6 sm:p-10 lg:p-12 relative overflow-hidden border border-slate-800 shadow-xl">
           <div className="absolute top-0 right-0 w-96 h-96 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
@@ -259,7 +205,7 @@ export const HomePage: React.FC = () => {
           <div className="relative z-10 max-w-2xl mb-8">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-red-950/80 border border-red-800 rounded-full text-red-400 text-xs font-bold uppercase tracking-wider mb-4">
               <Sparkles className="w-3.5 h-3.5 text-red-500" />
-              PC Builder
+              Công Cụ Cấu Hình PC
             </div>
             <h2 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold tracking-tight mb-4 text-white">
               Tự Tay Cấu Hình Dàn Máy Trong Vài Bước
@@ -274,7 +220,7 @@ export const HomePage: React.FC = () => {
               <div className="text-xs text-red-400 font-bold mb-1 font-mono">BƯỚC 1</div>
               <h4 className="text-sm font-bold text-white mb-1">Xác Định Nhu Cầu</h4>
               <p className="text-xs text-slate-400">
-                Lựa chọn mục đích: Gaming eSports, đồ họa render 3D hoặc phát triển mô hình tính toán.
+                Lựa chọn mục đích: Gaming, làm việc sáng tạo đồ họa hoặc tác vụ lập trình tính toán.
               </p>
             </div>
 
@@ -282,7 +228,7 @@ export const HomePage: React.FC = () => {
               <div className="text-xs text-red-400 font-bold mb-1 font-mono">BƯỚC 2</div>
               <h4 className="text-sm font-bold text-white mb-1">Lựa Chọn Linh Kiện</h4>
               <p className="text-xs text-slate-400">
-                Gợi ý linh kiện tương thích theo từng socket, băng thông PCIe và chuẩn RAM DDR5.
+                Lọc linh kiện tương thích theo từng socket CPU, chuẩn chân cắm bo mạch và thế hệ bộ nhớ.
               </p>
             </div>
 
@@ -290,106 +236,32 @@ export const HomePage: React.FC = () => {
               <div className="text-xs text-red-400 font-bold mb-1 font-mono">BƯỚC 3</div>
               <h4 className="text-sm font-bold text-white mb-1">Kiểm Tra Điện Năng &amp; TDP</h4>
               <p className="text-xs text-slate-400">
-                Kiểm tra điện áp công suất nguồn cần thiết và giải pháp tản nhiệt đáp ứng tải trọng.
+                Ước tính công suất nguồn cần thiết và giải pháp làm mát đáp ứng mức tải điện an toàn.
               </p>
             </div>
           </div>
 
           <div className="relative z-10 flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
-            <div className="text-xs text-slate-400">
-              * Một số tính năng đang được hoàn thiện.
+            <div className="text-xs text-slate-400 font-mono">
+              Hỗ trợ tùy biến linh hoạt cho từng cấu hình cá nhân
             </div>
             <Link
               to="/pc-builder"
               className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-red-600 text-white text-sm font-bold hover:bg-red-700 transition-colors shadow-lg shadow-red-600/30"
             >
-              <span>Xem Trang Giới Thiệu PC Builder</span>
+              <span>Vào Công Cụ PC Builder</span>
               <ArrowRight className="w-4 h-4" />
             </Link>
           </div>
         </div>
       </section>
 
-      {/* 4. FEATURED PRODUCTS */}
+      {/* 4. TIÊU CHUẨN DỊCH VỤ VÀ LINH KIỆN */}
       <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-mono font-medium mb-2 border border-slate-200">
-              Dữ liệu minh họa
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight">
-              Sản Phẩm Nổi Bật
-            </h2>
-          </div>
-          <p className="text-xs text-slate-500 max-w-sm">
-            Các dòng linh kiện tiêu biểu với thông số kỹ thuật rõ ràng.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {FEATURED_PRODUCTS_DATA.map((product) => (
-            <div
-              key={product.id}
-              className="bg-white rounded-2xl border border-slate-200/80 shadow-sm hover:border-red-300 hover:shadow-lg transition-all group flex flex-col justify-between overflow-hidden"
-            >
-              <div className="p-4">
-                <div className="relative w-full aspect-square bg-slate-100 rounded-xl overflow-hidden mb-4">
-                  <img
-                    src={product.imageUrl}
-                    alt={product.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    loading="lazy"
-                  />
-                  <span className="absolute top-2 left-2 bg-slate-900/90 text-white text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
-                    {product.tag}
-                  </span>
-                </div>
-
-                <div className="text-[11px] font-semibold text-red-600 uppercase tracking-wider mb-1">
-                  {product.brand}
-                </div>
-                <h3 className="text-sm font-bold text-slate-900 group-hover:text-red-600 transition-colors line-clamp-2 mb-2.5">
-                  {product.name}
-                </h3>
-
-                <div className="space-y-1 mb-4">
-                  {product.specs.map((spec, i) => (
-                    <div
-                      key={i}
-                      className="text-[11px] text-slate-600 flex items-center gap-1.5"
-                    >
-                      <CheckCircle2 className="w-3 h-3 text-red-500 flex-shrink-0" />
-                      <span>{spec}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="p-4 pt-3 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-[10px] text-slate-400 uppercase font-medium">Giá tham khảo</div>
-                  <div className="text-sm font-bold text-slate-950 font-mono">
-                    {product.priceDemo}
-                  </div>
-                </div>
-                <Link
-                  to="/products"
-                  className="px-3.5 py-1.5 rounded-full bg-slate-900 text-white text-xs font-semibold hover:bg-red-600 transition-colors shadow-sm"
-                >
-                  Chi Tiết
-                </Link>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* 5. SERVICE BENEFITS SECTION */}
-      <section className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200/80 shadow-sm">
+        <div className="bg-white p-8 sm:p-12 rounded-3xl border border-slate-200/80 shadow-2xs">
           <div className="text-center max-w-2xl mx-auto mb-10">
             <div className="text-xs font-bold uppercase tracking-wider text-red-600 mb-2">
-              Khả Năng Nền Tảng
+              Cam Kết Nền Tảng
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-950 tracking-tight mb-3">
               Tiêu Chuẩn Phần Cứng &amp; Dịch Vụ
@@ -400,21 +272,45 @@ export const HomePage: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {SERVICE_BENEFITS.map((b) => (
-              <div
-                key={b.id}
-                className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60"
-              >
-                <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
-                  {b.iconName === 'Layers' && <Layers className="w-5 h-5" />}
-                  {b.iconName === 'Cpu' && <Cpu className="w-5 h-5" />}
-                  {b.iconName === 'CheckCircle2' && <CheckCircle2 className="w-5 h-5" />}
-                  {b.iconName === 'PackageCheck' && <PackageCheck className="w-5 h-5" />}
-                </div>
-                <h3 className="text-sm font-bold text-slate-900 mb-2">{b.title}</h3>
-                <p className="text-xs text-slate-600 leading-relaxed">{b.description}</p>
+            <div className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
+                <ShieldCheck className="w-5 h-5" />
               </div>
-            ))}
+              <h3 className="text-sm font-bold text-slate-900 mb-2">Chính Hãng &amp; Minh Bạch</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Thông tin xuất xứ, nhà phân phối và thông số kỹ thuật được cập nhật chính xác, trung thực.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
+                <Cpu className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">Đồng Bộ Kỹ Thuật</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Hệ thống dữ liệu chuẩn hóa theo 9 nhóm linh kiện phần cứng, giúp việc lọc và tra cứu liền mạch.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">Quy Trình Kiểm Tra Kỹ</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Từng cấu hình PC trước khi bàn giao đều trải qua các bước kiểm tra phần cứng và độ ổn định cơ bản.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-start p-5 rounded-2xl bg-slate-50/70 border border-slate-200/60">
+              <div className="w-10 h-10 rounded-full bg-red-50 border border-red-200/60 flex items-center justify-center text-red-600 mb-4">
+                <PackageCheck className="w-5 h-5" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 mb-2">Đóng Gói Cẩn Thận</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Linh kiện và bộ máy tính được chèn đệm xốp chống sốc đa lớp, đảm bảo an toàn suốt hành trình giao hàng.
+              </p>
+            </div>
           </div>
         </div>
       </section>

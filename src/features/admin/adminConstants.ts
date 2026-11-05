@@ -125,6 +125,11 @@ export const ADMIN_ERROR_MESSAGES: Record<string, string> = {
     'Metadata hoặc định dạng của file ảnh tải lên không hợp lệ.',
   'ProductMedia.NotFound':
     'Không tìm thấy file ảnh trên kho lưu trữ R2 để xác nhận.',
+  'Banner.Forbidden': 'Bạn không có quyền quản lý banner quảng cáo.',
+  'Banner.NotFound': 'Không tìm thấy banner quảng cáo yêu cầu.',
+  'Banner.MediaInUse':
+    'Không thể xóa banner vì tài nguyên ảnh đang được tham chiếu bởi bản ghi khác.',
+  'Banner.InvalidPayload': 'Dữ liệu banner quảng cáo gửi lên không hợp lệ.',
 }
 
 export function mapAdminApiError(

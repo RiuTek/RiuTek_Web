@@ -27,6 +27,9 @@ import { getCategories } from '../productApi'
 
 interface HomeCategoryMenuProps {
   initialCategories?: Category[]
+  isLoadingCategories?: boolean
+  categoriesError?: Error | null
+  onRetryCategories?: () => void
 }
 
 /**
@@ -132,17 +135,22 @@ function getCategoryIcon(type: ComponentType) {
 
 export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
   initialCategories,
+  isLoadingCategories,
+  categoriesError: propCategoriesError,
+  onRetryCategories,
 }) => {
+  const isControlled = initialCategories !== undefined
+
   const [fetchedCategories, setFetchedCategories] = useState<Category[]>([])
-  const [isLoadingCats, setIsLoadingCats] = useState(
+  const [internalLoadingCats, setInternalLoadingCats] = useState(
     !initialCategories || initialCategories.length === 0
   )
-  const [categoriesError, setCategoriesError] = useState<Error | null>(null)
+  const [internalCategoriesError, setInternalCategoriesError] = useState<Error | null>(null)
   const [categoriesRetryCount, setCategoriesRetryCount] = useState(0)
-  const categories =
-    initialCategories && initialCategories.length > 0
-      ? initialCategories
-      : fetchedCategories
+
+  const categories = isControlled ? initialCategories : fetchedCategories
+  const isLoadingCats = isControlled ? (isLoadingCategories ?? false) : internalLoadingCats
+  const categoriesError = isControlled ? (propCategoriesError ?? null) : internalCategoriesError
 
   // Danh mục GỐC (parentId === null) cho thanh list chính
   const rootCategories = useMemo(() => {
@@ -184,9 +192,9 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
   const leaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const menuContainerRef = useRef<HTMLDivElement | null>(null)
 
-  // 1. Nạp categories nếu chưa có (có hỗ trợ retry khi lỗi)
+  // 1. Nạp categories nếu chưa có (chỉ chạy khi uncontrolled)
   useEffect(() => {
-    if (initialCategories && initialCategories.length > 0) {
+    if (isControlled) {
       return
     }
 
@@ -196,27 +204,32 @@ export const HomeCategoryMenu: React.FC<HomeCategoryMenuProps> = ({
     getCategories(controller.signal)
       .then((data) => {
         if (!isMounted) return
-        setFetchedCategories(data)
-        setCategoriesError(null)
+        setFetchedCategories(Array.isArray(data) ? data : [])
+        setInternalCategoriesError(null)
       })
       .catch((err) => {
         if (!isMounted) return
-        setCategoriesError(err instanceof Error ? err : new Error(String(err)))
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setInternalCategoriesError(err instanceof Error ? err : new Error(String(err)))
       })
       .finally(() => {
-        if (isMounted) setIsLoadingCats(false)
+        if (isMounted) setInternalLoadingCats(false)
       })
 
     return () => {
       isMounted = false
       controller.abort()
     }
-  }, [initialCategories, categoriesRetryCount])
+  }, [isControlled, categoriesRetryCount])
 
   const handleRetryCategories = () => {
-    setIsLoadingCats(true)
-    setCategoriesError(null)
-    setCategoriesRetryCount((prev) => prev + 1)
+    if (isControlled && onRetryCategories) {
+      onRetryCategories()
+    } else {
+      setInternalLoadingCats(true)
+      setInternalCategoriesError(null)
+      setCategoriesRetryCount((prev) => prev + 1)
+    }
   }
 
   // 2. Nạp lazy filter options cho activeCategory (desktop)
