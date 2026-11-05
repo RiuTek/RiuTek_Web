@@ -204,7 +204,7 @@ export function createSnapshotFromSavedBuild(build: MyPCBuild): PCBuildExportSna
     buildName: (build.name ?? '').trim() || 'Cấu hình PC đã lưu',
     items: exportItems,
     totalPrice: build.totalPrice, // TỔNG GIÁ SNAPSHOT ĐÃ LƯU
-    priceLabel: 'Tổng giá snapshot đã lưu (Giá tại thời điểm lưu cấu hình)',
+    priceLabel: 'Tổng giá lúc lưu cấu hình (Giá tại thời điểm lưu)',
     savedDateStr: formatSavedDate(build.createdAt),
     exportedAt: new Date(),
     estimatedWattage: build.estimatedWattage,

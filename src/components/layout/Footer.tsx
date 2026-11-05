@@ -21,7 +21,7 @@ export const Footer: React.FC = () => {
               />
             </Link>
             <p className="text-sm text-slate-400 leading-relaxed">
-              Nền tảng thương mại điện tử chuyên sâu về linh kiện máy tính, hệ thống PC Gaming và máy trạm đồ họa, tính toán hiệu năng cao.
+              RiuTek — Linh kiện máy tính và tự chọn cấu hình PC. Tìm linh kiện, chọn cấu hình phù hợp và đặt hàng tại RiuTek.
             </p>
           </div>
 
@@ -36,12 +36,12 @@ export const Footer: React.FC = () => {
               </li>
               <li>
                 <Link to="/products" className="hover:text-red-400 transition-colors">
-                  Danh Mục Linh Kiện
+                  Linh Kiện
                 </Link>
               </li>
               <li>
                 <Link to="/pc-builder" className="hover:text-red-400 transition-colors">
-                  PC Builder
+                  Tự Chọn Cấu Hình
                 </Link>
               </li>
               <li>
@@ -57,23 +57,33 @@ export const Footer: React.FC = () => {
             <h4 className="text-sm font-bold text-white uppercase tracking-wider">Nhóm Linh Kiện</h4>
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
-                <Link to="/products" className="hover:text-red-400 transition-colors">
+                <Link to="/products?componentType=1" className="hover:text-red-400 transition-colors">
                   Vi Xử Lý (CPU)
                 </Link>
               </li>
               <li>
-                <Link to="/products" className="hover:text-red-400 transition-colors">
+                <Link to="/products?componentType=3" className="hover:text-red-400 transition-colors">
                   Card Đồ Họa (GPU)
                 </Link>
               </li>
               <li>
-                <Link to="/products" className="hover:text-red-400 transition-colors">
+                <Link to="/products?componentType=2" className="hover:text-red-400 transition-colors">
                   Bo Mạch Chủ (Mainboard)
                 </Link>
               </li>
               <li>
-                <Link to="/products" className="hover:text-red-400 transition-colors">
-                  Bộ Nhớ RAM &amp; SSD NVMe
+                <Link to="/products?componentType=4" className="hover:text-red-400 transition-colors">
+                  Bộ Nhớ RAM
+                </Link>
+              </li>
+              <li>
+                <Link to="/products?componentType=5" className="hover:text-red-400 transition-colors">
+                  Ổ Cứng (SSD &amp; HDD)
+                </Link>
+              </li>
+              <li>
+                <Link to="/products?componentType=6" className="hover:text-red-400 transition-colors">
+                  Nguồn Máy Tính (PSU)
                 </Link>
               </li>
             </ul>
@@ -106,7 +116,7 @@ export const Footer: React.FC = () => {
         <div className="pt-8 border-t border-slate-900 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
           <p>© {new Date().getFullYear()} RiuTek. Tất cả quyền được bảo lưu.</p>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Nền tảng phần cứng &amp; cấu hình PC</span>
+            <span>Linh kiện máy tính &amp; tự chọn cấu hình PC</span>
           </div>
         </div>
       </div>

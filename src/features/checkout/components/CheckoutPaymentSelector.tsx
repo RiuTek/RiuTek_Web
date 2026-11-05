@@ -75,10 +75,10 @@ export const CheckoutPaymentSelector: React.FC<CheckoutPaymentSelectorProps> = (
             <div className="space-y-1">
               <span className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
                 <CreditCard className="w-4 h-4 text-indigo-600" />
-                <span>Thẻ Quốc Tế (Stripe Test)</span>
+                <span>Thanh toán bằng thẻ (thử nghiệm)</span>
               </span>
               <p className="text-[11px] text-slate-500 leading-relaxed">
-                Chuyển tiếp bảo mật sang cổng Stripe Checkout để thanh toán bằng thẻ.
+                Bạn sẽ chuyển sang Stripe để thanh toán thử.
               </p>
             </div>
           </label>

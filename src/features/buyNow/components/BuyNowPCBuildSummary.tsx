@@ -284,15 +284,10 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
             ) : (
               <>
                 <CreditCard className="w-3.5 h-3.5 text-red-600" />
-                <span>Thẻ / QR qua Stripe</span>
+                <span>Thanh toán thẻ (thử nghiệm)</span>
               </>
             )}
           </span>
-        </div>
-
-        <div className="flex items-center justify-between text-xs text-slate-600">
-          <span>Phí vận chuyển:</span>
-          <span className="text-emerald-700 font-bold">Miễn phí giao hàng</span>
         </div>
 
         {currentTotal > 0 && (
@@ -458,8 +453,8 @@ export const BuyNowPCBuildSummary: React.FC<BuyNowPCBuildSummaryProps> = ({
           ) : (
             <span>
               {paymentMethod === 'Stripe'
-                ? 'Tiếp tục thanh toán với Stripe'
-                : 'Xác nhận đặt mua cấu hình'}
+                ? 'Thanh toán bằng thẻ (thử nghiệm)'
+                : 'Đặt hàng (COD)'}
             </span>
           )}
         </button>

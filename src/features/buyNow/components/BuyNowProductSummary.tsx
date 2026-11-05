@@ -149,8 +149,8 @@ export const BuyNowProductSummary: React.FC<BuyNowProductSummaryProps> = ({
         ) : (
           <span>
             {paymentMethod === 'COD'
-              ? 'Xác Nhận Đặt Hàng (COD)'
-              : 'Tiến Hành Thanh Toán Stripe'}
+              ? 'Đặt hàng (COD)'
+              : 'Thanh toán bằng thẻ (thử nghiệm)'}
           </span>
         )}
       </button>

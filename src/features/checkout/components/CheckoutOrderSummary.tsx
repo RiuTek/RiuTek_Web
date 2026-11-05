@@ -360,17 +360,17 @@ export const CheckoutOrderSummary: React.FC<CheckoutOrderSummaryProps> = ({
             <ShieldCheck className="w-5 h-5" />
             <span>
               {paymentMethod === 'Stripe'
-                ? 'Tiếp tục thanh toán với Stripe'
-                : 'Đặt Hàng Ngay'}
+                ? 'Thanh toán bằng thẻ (thử nghiệm)'
+                : 'Đặt hàng (COD)'}
             </span>
           </>
         )}
       </button>
 
-      {/* Backend Verification Note */}
+      {/* Verification Note */}
       <div className="p-3 bg-slate-50 border border-slate-100 rounded-2xl flex items-center gap-2 text-[11px] text-slate-500">
         <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-        <span>Giá và tồn kho được Backend kiểm tra lại khi tạo đơn hàng.</span>
+        <span>Giá và tình trạng hàng sẽ được kiểm tra lại khi bạn đặt hàng.</span>
       </div>
     </div>
   )

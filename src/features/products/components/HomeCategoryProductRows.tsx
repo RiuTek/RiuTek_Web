@@ -237,16 +237,16 @@ export const HomeCategoryProductRows: React.FC<HomeCategoryProductRowsProps> = (
             <Sparkles className="w-6 h-6" />
           </div>
           <h3 className="text-lg font-bold text-slate-900 mb-1">
-            Khám Phá Toàn Bộ Danh Mục Linh Kiện
+            Xem Toàn Bộ Danh Mục Linh Kiện
           </h3>
           <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-            Xem toàn bộ các loại linh kiện máy tính chính hãng, áp dụng bộ lọc thông số kỹ thuật và so sánh chi tiết.
+            Khám phá đầy đủ các linh kiện máy tính, dễ dàng lọc theo thông số kỹ thuật và chọn mua sản phẩm phù hợp.
           </p>
           <Link
             to="/products"
             className="inline-flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-full text-xs font-bold hover:bg-red-700 transition-colors shadow-md shadow-red-600/25"
           >
-            <span>Khám Phá Danh Mục</span>
+            <span>Xem tất cả linh kiện</span>
             <ArrowRight className="w-4 h-4" />
           </Link>
         </div>

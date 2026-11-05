@@ -218,10 +218,10 @@ export const HomeBannerCarousel: React.FC<HomeBannerCarouselProps> = ({
 
         <div className="relative z-10 my-auto py-2 max-w-xl">
           <h2 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-white mb-2 leading-tight">
-            Nền Tảng Linh Kiện &amp; Cấu Hình PC Chuyên Nghiệp
+            Chọn Linh Kiện, Dựng PC Theo Ý Bạn
           </h2>
           <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-4 line-clamp-2">
-            Tra cứu thông số kỹ thuật, đối chiếu chuẩn socket tương thích và tự xây dựng bộ máy tính tối ưu hiệu năng cùng công cụ PC Builder.
+            Tìm linh kiện phù hợp, đối chiếu chuẩn tương thích và đặt hàng dễ dàng cùng công cụ tự chọn cấu hình RiuTek.
           </p>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -229,21 +229,21 @@ export const HomeBannerCarousel: React.FC<HomeBannerCarouselProps> = ({
               to="/pc-builder"
               className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-full text-xs sm:text-sm font-bold shadow-md shadow-red-600/30 transition-all transform hover:-translate-y-0.5"
             >
-              <span>Trải Nghiệm PC Builder</span>
+              <span>Tự chọn cấu hình</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </Link>
             <Link
               to="/products"
               className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-200 rounded-full text-xs sm:text-sm font-semibold border border-slate-700 transition-colors"
             >
-              <span>Xem Tất Cả Linh Kiện</span>
+              <span>Mua linh kiện</span>
             </Link>
           </div>
         </div>
 
         <div className="relative z-10 flex items-center gap-6 text-[10px] sm:text-[11px] text-slate-400 font-mono pt-2 border-t border-slate-800/80">
-          <div>Chuẩn Form Factor đồng bộ</div>
-          <div>Băng thông PCIe thế hệ mới</div>
+          <div>Linh kiện máy tính chính hãng</div>
+          <div>Kiểm tra tương thích cấu hình</div>
         </div>
       </div>
     )

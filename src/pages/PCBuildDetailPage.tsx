@@ -519,7 +519,7 @@ const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
 
           <div className="text-left sm:text-right flex-shrink-0">
             <span className="text-[10px] text-slate-400 block font-medium uppercase tracking-wider">
-              Tổng giá snapshot đã lưu
+              Tổng giá lúc lưu cấu hình
             </span>
             <span className="text-2xl sm:text-3xl font-extrabold text-red-600">
               {formatVnd(build.totalPrice)}

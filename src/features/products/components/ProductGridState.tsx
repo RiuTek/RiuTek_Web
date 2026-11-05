@@ -91,13 +91,13 @@ export const ProductGridEmpty: React.FC<ProductGridEmptyProps> = ({
 
       <h3 className="text-base font-bold text-slate-900 mb-2">
         {hasActiveFilters
-          ? 'Không Tìm Thấy Sản Phẩm Phù Hợp'
-          : 'Danh Mục Sản Phẩm Đang Được Cập Nhật'}
+          ? 'Chưa Có Sản Phẩm Phù Hợp'
+          : 'Danh Mục Đang Được Cập Nhật'}
       </h3>
 
       <p className="text-xs sm:text-sm text-slate-600 mb-6 leading-relaxed">
         {hasActiveFilters
-          ? 'Không có sản phẩm nào khớp với tiêu chí tìm kiếm hoặc bộ lọc hiện tại của bạn. Hãy thử thay đổi hoặc xóa bớt bộ lọc.'
+          ? 'Chưa có sản phẩm phù hợp. Thử đổi bộ lọc hoặc xem tất cả linh kiện.'
           : 'Hiện tại chưa có sản phẩm nào trong danh mục này. Vui lòng quay lại sau.'}
       </p>
 

@@ -62,20 +62,20 @@ export const PCBuilderPage: React.FC = () => {
               <span>Trang chủ</span>
             </Link>
             <span>/</span>
-            <span className="text-slate-900 font-bold">Xây dựng cấu hình PC</span>
+            <span className="text-slate-900 font-bold">Tự chọn cấu hình PC</span>
           </div>
 
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="space-y-1.5">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-50 text-red-600 border border-red-100 text-xs font-bold">
                 <Wrench className="w-3.5 h-3.5" />
-                <span>RiuTek PC Builder</span>
+                <span>Tự chọn cấu hình</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tight">
-                Xây Dựng Cấu Hình Máy Tính
+                Tự Chọn Cấu Hình PC
               </h1>
               <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
-                Tự do tùy biến dàn máy theo sở thích và nhu cầu công việc. Hệ thống tự động kiểm tra tương thích giữa các linh kiện và tính toán công suất nguồn khuyến nghị theo thời gian thực.
+                Chọn từng linh kiện, xem tổng tiền và kiểm tra các lưu ý trước khi đặt hàng.
               </p>
               <div className="flex items-center gap-1.5 pt-1 text-slate-500 text-xs">
                 <Clock className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
@@ -87,11 +87,11 @@ export const PCBuilderPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-600">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
                 <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span>Kiểm tra tương thích theo quy tắc</span>
+                <span>Kiểm tra tương thích</span>
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
                 <Zap className="w-4 h-4 text-amber-500" />
-                <span>Ước tính công suất PSU</span>
+                <span>Ước tính công suất nguồn</span>
               </span>
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 border border-slate-200">
                 <Cpu className="w-4 h-4 text-blue-600" />

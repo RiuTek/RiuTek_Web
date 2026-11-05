@@ -112,7 +112,7 @@ export const Header: React.FC = () => {
             }`}
           >
             <Sparkles className="w-4 h-4 text-red-500 animate-pulse" />
-            PC Builder
+            Tự Chọn Cấu Hình
           </Link>
         </nav>
 
@@ -289,31 +289,39 @@ export const Header: React.FC = () => {
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-6 whitespace-nowrap min-w-max">
           <div className="flex items-center gap-5">
             <Link
-              to="/products"
+              to="/products?componentType=1"
               className="hover:text-red-400 transition-colors flex items-center gap-1 font-medium"
             >
               <Cpu className="w-3.5 h-3.5 text-red-400" />
               Vi Xử Lý (CPU)
             </Link>
             <span className="text-slate-700">•</span>
-            <Link to="/products" className="hover:text-red-400 transition-colors font-medium">
+            <Link to="/products?componentType=3" className="hover:text-red-400 transition-colors font-medium">
               Card Đồ Họa (GPU)
             </Link>
             <span className="text-slate-700">•</span>
-            <Link to="/products" className="hover:text-red-400 transition-colors font-medium">
+            <Link to="/products?componentType=2" className="hover:text-red-400 transition-colors font-medium">
               Bo Mạch Chủ (Mainboard)
             </Link>
             <span className="text-slate-700">•</span>
-            <Link to="/products" className="hover:text-red-400 transition-colors font-medium">
-              RAM &amp; SSD PCIe Gen 5
+            <Link to="/products?componentType=4" className="hover:text-red-400 transition-colors font-medium">
+              Bộ Nhớ RAM
             </Link>
             <span className="text-slate-700">•</span>
-            <Link to="/products" className="hover:text-red-400 transition-colors font-medium">
+            <Link to="/products?componentType=5" className="hover:text-red-400 transition-colors font-medium">
+              Ổ Cứng (SSD &amp; HDD)
+            </Link>
+            <span className="text-slate-700">•</span>
+            <Link to="/products?componentType=6" className="hover:text-red-400 transition-colors font-medium">
               Nguồn Máy Tính (PSU)
             </Link>
             <span className="text-slate-700">•</span>
-            <Link to="/products" className="hover:text-red-400 transition-colors font-medium">
-              Vỏ Case &amp; Tản Nhiệt
+            <Link to="/products?componentType=7" className="hover:text-red-400 transition-colors font-medium">
+              Vỏ Case
+            </Link>
+            <span className="text-slate-700">•</span>
+            <Link to="/products?componentType=8" className="hover:text-red-400 transition-colors font-medium">
+              Tản Nhiệt
             </Link>
           </div>
           <span className="text-slate-400 text-[11px] hidden md:inline">
@@ -344,7 +352,7 @@ export const Header: React.FC = () => {
                   : 'text-slate-700 hover:bg-slate-50'
               }`}
             >
-              Linh Kiện Phần Cứng
+              Linh Kiện
             </Link>
             <Link
               to="/pc-builder"
@@ -353,7 +361,7 @@ export const Header: React.FC = () => {
                 isActive('/pc-builder') ? 'bg-red-50 text-red-600' : 'text-slate-700 hover:bg-slate-50'
               }`}
             >
-              PC Builder Studio
+              Tự Chọn Cấu Hình
             </Link>
             <Link
               to="/cart"
