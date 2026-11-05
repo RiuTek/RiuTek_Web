@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   Bookmark,
@@ -33,6 +33,8 @@ import {
 } from '../features/pcBuilder/pcBuilderTypes'
 import { getComponentStockDisplay } from '../features/pcBuilder/pcBuilderStockHelper'
 import { PCBuildCompatibilityNotice } from '../features/pcBuilder/components/PCBuildCompatibilityNotice'
+import { createSnapshotFromSavedBuild } from '../features/pcBuilder/pcBuildExportTypes'
+import { PCBuildExportImageButton } from '../features/pcBuilder/components/PCBuildExportImageButton'
 
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -396,6 +398,11 @@ const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
     }
   }
 
+  const handleGetSavedBuildSnapshot = useCallback(() => {
+    if (!build) return null
+    return createSnapshotFromSavedBuild(build)
+  }, [build])
+
   // Loading State
   if (isLoading) {
     return (
@@ -552,7 +559,17 @@ const PCBuildDetailContent: React.FC<PCBuildDetailContentProps> = ({
               Thêm cấu hình sẽ cộng dồn các linh kiện này vào giỏ hàng hiện có của bạn (các sản phẩm đã có trong giỏ không bị thay thế). Giá và tồn kho thực tế sẽ được xác nhận khi thanh toán.
             </div>
 
-            <div className="flex items-center gap-3 flex-shrink-0">
+            <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+              {/* Tải ảnh cấu hình */}
+              <PCBuildExportImageButton
+                onGetSnapshot={handleGetSavedBuildSnapshot}
+                disabled={isDeleting || isAddingToCart}
+                className="px-4 py-2.5"
+                variant="outline"
+                buttonText="Tải ảnh cấu hình"
+                contextKey={build.id}
+              />
+
               {/* Edit Button */}
               <Link
                 to={`/pc-builds/${build.id}/edit`}

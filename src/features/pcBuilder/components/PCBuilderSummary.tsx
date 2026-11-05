@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
@@ -40,6 +40,11 @@ import {
   type SaveConfirmationSnapshot,
 } from '../pcBuildSaveHelper'
 import { PCBuildCompatibilityNotice } from './PCBuildCompatibilityNotice'
+import {
+  canExportFromBuilder,
+  createSnapshotFromBuilder,
+} from '../pcBuildExportTypes'
+import { PCBuildExportImageButton } from './PCBuildExportImageButton'
 import type {
   MyPCBuild,
   PCBuildItemInput,
@@ -217,6 +222,46 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
     user?.id === savedBuildInfo.ownerUserId &&
     savedBuildInfo.configKeyAtSave === currentConfigKey &&
     hasItems
+
+  // Kiểm tra điều kiện xuất ảnh cấu hình
+  const exportEligibility = useMemo(() => {
+    return canExportFromBuilder({
+      selectedItems,
+      previewResult,
+      isPreviewLoading: isLoading,
+      previewError: error,
+    })
+  }, [selectedItems, previewResult, isLoading, error])
+
+  const handleGetBuilderSnapshot = useCallback(() => {
+    const check = canExportFromBuilder({
+      selectedItems,
+      previewResult,
+      isPreviewLoading: isLoading,
+      previewError: error,
+    })
+    if (!check.canExport || !previewResult) {
+      return null
+    }
+
+    const defaultName =
+      isCurrentBuildSaved && savedBuildInfo?.build?.name
+        ? savedBuildInfo.build.name
+        : undefined
+
+    return createSnapshotFromBuilder({
+      selectedItems,
+      previewResult,
+      buildName: defaultName,
+    })
+  }, [
+    selectedItems,
+    previewResult,
+    isLoading,
+    error,
+    isCurrentBuildSaved,
+    savedBuildInfo,
+  ])
 
   // Mở form lưu cấu hình
   const handleOpenSaveModal = (e?: React.MouseEvent<HTMLButtonElement>) => {
@@ -711,6 +756,26 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
             >
               <X className="w-3.5 h-3.5" />
             </button>
+          </div>
+        )}
+
+        {/* Nút Xuất Ảnh Cấu Hình (Cho cả khách và thành viên) */}
+        {hasItems && (
+          <div className="space-y-1">
+            <PCBuildExportImageButton
+              onGetSnapshot={handleGetBuilderSnapshot}
+              disabled={!exportEligibility.canExport}
+              disabledTooltip={exportEligibility.reason}
+              className="w-full py-3"
+              variant="outline"
+              buttonText="Tải ảnh cấu hình"
+              contextKey={currentConfigKey}
+            />
+            {!exportEligibility.canExport && exportEligibility.reason && (
+              <p className="text-[10px] text-slate-400 text-center">
+                {exportEligibility.reason}
+              </p>
+            )}
           </div>
         )}
 
