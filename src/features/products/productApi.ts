@@ -56,7 +56,10 @@ export async function getProducts(
         dedupedBrands.push(b)
       }
     }
-    params.brands = dedupedBrands.slice(0, 20)
+    if (dedupedBrands.length > 20) {
+      throw new Error('Số lượng lựa chọn cho nhóm brands vượt quá giới hạn tối đa (20).')
+    }
+    params.brands = dedupedBrands
   }
 
   if (filters.minPrice !== undefined && filters.minPrice >= 0) {
@@ -93,7 +96,10 @@ export async function getProducts(
       combined.push(scalar)
     }
     if (combined.length > 0) {
-      const unique = Array.from(new Set(combined)).slice(0, 20)
+      const unique = Array.from(new Set(combined))
+      if (unique.length > 20) {
+        throw new Error(`Số lượng lựa chọn cho nhóm ${pluralKey} vượt quá giới hạn tối đa (20).`)
+      }
       params[pluralKey] = unique
     }
   }

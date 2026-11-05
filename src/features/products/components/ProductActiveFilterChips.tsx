@@ -36,11 +36,11 @@ export const ProductActiveFilterChips: React.FC<ProductActiveFilterChipsProps> =
     })
   }
 
-  // 2. Component Type
-  if (filters.componentType) {
+  // 2. Component Type (chỉ hiển thị chip nếu là link type-only cũ không có categoryId)
+  if (filters.componentType && !filters.categoryId) {
     chips.push({
       id: `type-${filters.componentType}`,
-      label: COMPONENT_TYPE_LABELS[filters.componentType] ?? `Loại #${filters.componentType}`,
+      label: `Loại: ${COMPONENT_TYPE_LABELS[filters.componentType]?.split('(')[0].trim() ?? filters.componentType}`,
       onRemove: () => onRemoveFilter('componentType'),
     })
   }

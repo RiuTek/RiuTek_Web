@@ -232,21 +232,8 @@ export function formatChoiceLabel(key: string, value: string | number): string {
 }
 
 const STRICT_INT_REGEX = /^\d+$/
-const SAFE_ID_REGEX = /^[a-zA-Z0-9_-]+$/
-
-const COMPONENT_TYPE_NAME_MAP: Record<string, ComponentType> = {
-  cpu: ComponentType.CPU,
-  motherboard: ComponentType.Motherboard,
-  mainboard: ComponentType.Motherboard,
-  gpu: ComponentType.GPU,
-  vga: ComponentType.GPU,
-  ram: ComponentType.RAM,
-  storage: ComponentType.Storage,
-  psu: ComponentType.PSU,
-  case: ComponentType.Case,
-  cooler: ComponentType.Cooler,
-  accessory: ComponentType.Accessory,
-}
+const GUID_REGEX =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
 /**
  * Parse strictly positive int32 <= 2147483647
@@ -374,6 +361,7 @@ export interface ParseFiltersResult {
   filters: ParsedProductCatalogFilters
   priceError: string | null
   overflowError: string | null
+  invalidCategoryError: string | null
 }
 
 /**
@@ -381,44 +369,35 @@ export interface ParseFiltersResult {
  */
 export function parseFiltersFromUrl(searchParams: URLSearchParams): ParseFiltersResult {
   let overflowError: string | null = null
+  let invalidCategoryError: string | null = null
 
   // Phân trang
-  const rawPage = parseStrictPositiveInt32(searchParams.get('pageIndex') ?? searchParams.get('page'))
+  const rawPage = parseStrictPositiveInt32(searchParams.get('pageIndex'))
   const pageIndex = rawPage && rawPage >= 1 ? rawPage : 1
 
-  const rawPageSize = parseStrictPositiveInt32(searchParams.get('pageSize') ?? searchParams.get('limit'))
+  const rawPageSize = parseStrictPositiveInt32(searchParams.get('pageSize'))
   const pageSize = rawPageSize && rawPageSize >= 1 && rawPageSize <= 50 ? rawPageSize : 20
 
   // Sắp xếp
-  const rawSort = searchParams.get('sortBy')
-  let sortBy = 1
-  if (rawSort) {
-    const numSort = parseStrictPositiveInt32(rawSort)
-    if (numSort && numSort >= 1 && numSort <= 5) {
-      sortBy = numSort
-    } else if (rawSort === 'price' || rawSort === 'priceLowToHigh') {
-      sortBy = 2
-    } else if (rawSort === 'priceHighToLow') {
-      sortBy = 3
-    } else if (rawSort === 'newest') {
-      sortBy = 1
-    }
-  }
+  const rawSort = parseStrictPositiveInt32(searchParams.get('sortBy'))
+  const sortBy = rawSort && rawSort >= 1 && rawSort <= 5 ? rawSort : 1
 
   // ComponentType & Category
-  const rawComponentType = (searchParams.get('componentType') ?? '').trim()
-  let componentType: ComponentType | undefined
-  if (rawComponentType) {
-    const numType = parseStrictPositiveInt32(rawComponentType)
-    if (numType && numType >= 1 && numType <= 9) {
-      componentType = numType as ComponentType
-    } else {
-      componentType = COMPONENT_TYPE_NAME_MAP[rawComponentType.toLowerCase()]
-    }
-  }
+  const rawComponentType = parseStrictPositiveInt32(searchParams.get('componentType'))
+  const componentType =
+    rawComponentType && rawComponentType >= 1 && rawComponentType <= 9
+      ? (rawComponentType as ComponentType)
+      : undefined
 
   const rawCategoryId = (searchParams.get('categoryId') ?? '').trim()
-  const categoryId = SAFE_ID_REGEX.test(rawCategoryId) ? rawCategoryId : ''
+  let categoryId = ''
+  if (rawCategoryId.length > 0) {
+    if (GUID_REGEX.test(rawCategoryId)) {
+      categoryId = rawCategoryId
+    } else {
+      invalidCategoryError = 'Mã danh mục không hợp lệ (yêu cầu định dạng GUID chuẩn).'
+    }
+  }
 
   const searchTerm = (searchParams.get('searchTerm') ?? '').trim().slice(0, 100)
 
@@ -548,6 +527,7 @@ export function parseFiltersFromUrl(searchParams: URLSearchParams): ParseFilters
     },
     priceError,
     overflowError,
+    invalidCategoryError,
   }
 }
 
@@ -722,8 +702,10 @@ export function buildProductFilterSearchParams(
   // Repeated plural array keys
   const appendArray = (key: string, items?: (string | number)[]) => {
     if (!items || items.length === 0) return
-    const capped = items.slice(0, MAX_FILTER_VALUES_PER_GROUP)
-    for (const item of capped) {
+    if (items.length > MAX_FILTER_VALUES_PER_GROUP) {
+      throw new Error(`Số lượng lựa chọn cho nhóm ${key} vượt quá giới hạn tối đa (${MAX_FILTER_VALUES_PER_GROUP}).`)
+    }
+    for (const item of items) {
       if (item !== undefined && item !== null && String(item).trim() !== '') {
         searchParams.append(key, String(item))
       }
@@ -890,4 +872,163 @@ export class ProductFilterOptionsCoordinator {
       this.activeAbortController = null
     }
   }
+}
+
+/**
+ * Kết quả của việc toggle một giá trị trong danh sách mảng bộ lọc
+ */
+export interface ToggleFilterChoiceResult {
+  nextValues: (string | number)[]
+  isAdded: boolean
+  isRemoved: boolean
+  isRejected: boolean
+  warning: string | null
+}
+
+/**
+ * Hàm thuần toggle một lựa chọn mảng với quy tắc tối đa 20 mục, case-insensitive cho chuỗi
+ */
+export function toggleArrayFilterChoice(
+  currentValues: (string | number)[],
+  value: string | number,
+  maxAllowed = MAX_FILTER_VALUES_PER_GROUP
+): ToggleFilterChoiceResult {
+  const isNum = typeof value === 'number'
+  const trimmedLower = isNum ? '' : String(value).trim().toLowerCase()
+
+  const exists = currentValues.some((item) =>
+    isNum ? item === value : String(item).trim().toLowerCase() === trimmedLower
+  )
+
+  if (exists) {
+    const nextValues = currentValues.filter((item) =>
+      isNum ? item !== value : String(item).trim().toLowerCase() !== trimmedLower
+    )
+    return {
+      nextValues,
+      isAdded: false,
+      isRemoved: true,
+      isRejected: false,
+      warning: null,
+    }
+  }
+
+  if (currentValues.length >= maxAllowed) {
+    return {
+      nextValues: currentValues,
+      isAdded: false,
+      isRemoved: false,
+      isRejected: true,
+      warning: `Mỗi nhóm chỉ được chọn tối đa ${maxAllowed} giá trị.`,
+    }
+  }
+
+  const nextItem = isNum ? value : String(value).trim()
+  return {
+    nextValues: [...currentValues, nextItem],
+    isAdded: true,
+    isRemoved: false,
+    isRejected: false,
+    warning: null,
+  }
+}
+
+/**
+ * Chuẩn bị tham số truy vấn sản phẩm cho network call:
+ * 1. Làm sạch các bộ lọc kỹ thuật không áp dụng cho componentType hiệu lực
+ * 2. Gán componentType hiệu lực vào request params để backend nhận được componentType
+ */
+export function prepareProductQueryParams(
+  filters: ProductFilterParams,
+  effectiveComponentType?: ComponentType
+): ProductFilterParams {
+  const applicable = filterApplicableTechnicalFilters(filters, effectiveComponentType)
+  return {
+    ...applicable,
+    componentType: effectiveComponentType,
+  }
+}
+
+export interface PrepareCatalogFilterUpdateOptions {
+  currentFilters: ParsedProductCatalogFilters
+  newParams: Partial<ProductFilterParams>
+  categories: Category[]
+  resetPage?: boolean
+}
+
+/**
+ * Chuẩn bị trạng thái cập nhật bộ lọc catalog an toàn:
+ * - Chọn category mới thì tự động suy luận componentType hiệu lực
+ * - Bỏ category thì xóa componentType sinh ra từ category đó
+ * - Xóa sạch các bộ lọc kỹ thuật không áp dụng cho componentType mới (không bị Object.assign ép ngược lại)
+ * - Đổi category/type thì reset pageIndex về 1
+ */
+export function prepareCatalogFilterUpdate({
+  currentFilters,
+  newParams,
+  categories,
+  resetPage = true,
+}: PrepareCatalogFilterUpdateOptions): ProductFilterParams {
+  const isCategoryExplicitlyGiven = 'categoryId' in newParams
+  const nextCategoryId = isCategoryExplicitlyGiven
+    ? (newParams.categoryId || undefined)
+    : (currentFilters.categoryId || undefined)
+
+  let nextComponentType: ComponentType | undefined
+
+  if (nextCategoryId) {
+    // Danh mục được chọn quyết định componentType
+    nextComponentType = inferComponentTypeFromCategory(categories, nextCategoryId)
+    if (nextComponentType === undefined && newParams.componentType !== undefined) {
+      nextComponentType = newParams.componentType
+    }
+  } else {
+    // Không có danh mục được chọn
+    if ('componentType' in newParams) {
+      nextComponentType = newParams.componentType || undefined
+    } else if (isCategoryExplicitlyGiven && currentFilters.categoryId) {
+      // Bỏ chọn danh mục: xóa componentType suy luận từ danh mục trước đó
+      nextComponentType = undefined
+    } else {
+      nextComponentType = currentFilters.componentType || undefined
+    }
+  }
+
+  const baseMerged: ProductFilterParams = {
+    ...currentFilters,
+    ...newParams,
+    categoryId: nextCategoryId,
+    componentType: nextComponentType,
+  }
+
+  const cleaned = filterApplicableTechnicalFilters(baseMerged, nextComponentType)
+
+  const isChangingCategory = nextCategoryId !== (currentFilters.categoryId || undefined)
+  const isChangingType = nextComponentType !== (currentFilters.componentType || undefined)
+  const shouldResetPage = resetPage || isChangingCategory || isChangingType
+
+  const result: ProductFilterParams = {
+    pageIndex: shouldResetPage ? 1 : (newParams.pageIndex ?? currentFilters.pageIndex ?? 1),
+    pageSize: newParams.pageSize ?? currentFilters.pageSize,
+    sortBy: newParams.sortBy ?? currentFilters.sortBy,
+    searchTerm: newParams.searchTerm !== undefined ? newParams.searchTerm : currentFilters.searchTerm,
+    categoryId: nextCategoryId,
+    componentType: nextComponentType,
+    minPrice: newParams.minPrice !== undefined ? newParams.minPrice : currentFilters.minPrice,
+    maxPrice: newParams.maxPrice !== undefined ? newParams.maxPrice : currentFilters.maxPrice,
+    inStock: newParams.inStock !== undefined ? newParams.inStock : currentFilters.inStock,
+    isActive: newParams.isActive !== undefined ? newParams.isActive : currentFilters.isActive,
+    brands: newParams.brands !== undefined ? newParams.brands : currentFilters.brands,
+  }
+
+  if (nextComponentType) {
+    const applicableGroups = TECHNICAL_GROUPS_BY_TYPE[nextComponentType] ?? []
+    for (const group of applicableGroups) {
+      if ((cleaned as Record<string, unknown>)[group] !== undefined) {
+        (result as Record<string, unknown>)[group] = (cleaned as Record<string, unknown>)[group]
+      }
+    }
+  }
+
+  return result
 }

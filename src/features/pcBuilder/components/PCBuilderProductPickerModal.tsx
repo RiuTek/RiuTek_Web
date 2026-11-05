@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   DollarSign,
   ArrowUpDown,
+  AlertCircle,
 } from 'lucide-react'
 import { getProducts } from '../../products/productApi'
 import {
@@ -26,7 +27,10 @@ import {
   type ProductFilterParams,
   type ProductSummary,
 } from '../../products/productTypes'
-import { ProductFilterOptionsCoordinator } from '../../products/productFilterHelper'
+import {
+  ProductFilterOptionsCoordinator,
+  toggleArrayFilterChoice,
+} from '../../products/productFilterHelper'
 import {
   isSingleChoiceComponent,
   MAX_MULTI_CHOICE_QUANTITY,
@@ -111,6 +115,15 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   const [optionsError, setOptionsError] = useState<Error | null>(null)
   const [optionsRetryTrigger, setOptionsRetryTrigger] = useState(0)
   const optionsCoordinatorRef = useRef(new ProductFilterOptionsCoordinator())
+  const [limitWarning, setLimitWarning] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!limitWarning) return
+    const timer = setTimeout(() => {
+      setLimitWarning(null)
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [limitWarning])
 
   // Mobile filter collapse toggle
   const [showMobileFilters, setShowMobileFilters] = useState(false)
@@ -211,22 +224,17 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   }, [activeSlot, inStockFilter, isActiveFilter, optionsRetryTrigger])
 
   const handleToggleTechnicalChoice = (key: string, value: string | number) => {
-    setTechnicalFilters((prev) => {
-      const current = (prev[key as keyof PCBuilderTechnicalFilterState] as (string | number)[]) ?? []
-      const exists = current.some((item) =>
-        typeof item === 'number' ? item === value : String(item).toLowerCase() === String(value).toLowerCase()
-      )
-      const next = exists
-        ? current.filter((item) =>
-            typeof item === 'number' ? item !== value : String(item).toLowerCase() !== String(value).toLowerCase()
-          )
-        : [...current, value]
+    const current = (technicalFilters[key as keyof PCBuilderTechnicalFilterState] as (string | number)[]) ?? []
+    const result = toggleArrayFilterChoice(current, value)
+    if (result.isRejected) {
+      setLimitWarning(result.warning)
+      return
+    }
 
-      return {
-        ...prev,
-        [key]: next,
-      }
-    })
+    setTechnicalFilters((prev) => ({
+      ...prev,
+      [key]: result.nextValues,
+    }))
     setPageIndex(1)
   }
 
@@ -611,6 +619,13 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
                 )}
               </div>
             </div>
+
+            {limitWarning && (
+              <div role="alert" className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-1.5 animate-in fade-in">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                <span>{limitWarning}</span>
+              </div>
+            )}
 
             {/* Bộ lọc kỹ thuật theo activeSlot */}
             <PCBuilderTechnicalFilters

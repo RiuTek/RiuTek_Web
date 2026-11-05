@@ -6,11 +6,12 @@ import {
   parseFiltersFromUrl,
   computeCanonicalQueryKey,
   inferComponentTypeFromCategory,
-  filterApplicableTechnicalFilters,
   buildProductFilterSearchParams,
   ProductFilterOptionsCoordinator,
+  prepareProductQueryParams,
+  prepareCatalogFilterUpdate,
+  toggleArrayFilterChoice,
   type ParsedProductCatalogFilters,
-  MAX_FILTER_VALUES_PER_GROUP,
 } from './productFilterHelper'
 import type {
   Category,
@@ -33,19 +34,30 @@ export function useProductCatalog() {
   const [categoriesError, setCategoriesError] = useState<ApiError | Error | null>(null)
 
   // 2. Parse URL parameters với strict validation
-  const { filters, priceError, overflowError } = useMemo(
+  const { filters, priceError, overflowError, invalidCategoryError } = useMemo(
     () => parseFiltersFromUrl(searchParams),
     [searchParams]
   )
 
-  // 3. Suy luận componentType từ categoryId nếu URL không có componentType
+  // 3. Suy luận componentType từ categoryId (category quyết định type, ưu tiên hơn URL legacy)
   const effectiveComponentType = useMemo(() => {
-    if (filters.componentType) return filters.componentType
     if (filters.categoryId && categories.length > 0) {
-      return inferComponentTypeFromCategory(categories, filters.categoryId)
+      const inferred = inferComponentTypeFromCategory(categories, filters.categoryId)
+      if (inferred !== undefined) return inferred
     }
-    return undefined
-  }, [filters.componentType, filters.categoryId, categories])
+    return filters.componentType
+  }, [filters.categoryId, filters.componentType, categories])
+
+  // Kiểm tra categoryId trong URL không tồn tại trong DB sau khi load xong
+  const isCategoryNotFound = useMemo(() => {
+    if (!filters.categoryId || isCategoriesLoading || categories.length === 0) return false
+    const inferred = inferComponentTypeFromCategory(categories, filters.categoryId)
+    return inferred === undefined
+  }, [filters.categoryId, isCategoriesLoading, categories])
+
+  const categoryNotFoundError = isCategoryNotFound
+    ? 'Danh mục đã chọn không tồn tại hoặc đã bị xóa.'
+    : null
 
   // 4. Products query state
   const [pagedResult, setPagedResult] = useState<PagedResult<ProductSummary> | null>(null)
@@ -53,12 +65,18 @@ export function useProductCatalog() {
   const [completedQueryKey, setCompletedQueryKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
-  // Canonical query key để theo dõi sự thay đổi của filters
+  // Canonical query key để theo dõi sự thay đổi của filters (tính cả effectiveComponentType)
   const queryKey = useMemo(() => {
-    return `${computeCanonicalQueryKey(filters)}:retry=${retryTrigger}`
-  }, [filters, retryTrigger])
+    return `${computeCanonicalQueryKey({ ...filters, componentType: effectiveComponentType })}:retry=${retryTrigger}`
+  }, [filters, effectiveComponentType, retryTrigger])
 
-  const isLoading = !priceError && !overflowError && completedQueryKey !== queryKey
+  const isLoading =
+    !priceError &&
+    !overflowError &&
+    !invalidCategoryError &&
+    !categoryNotFoundError &&
+    !(filters.categoryId && isCategoriesLoading) &&
+    completedQueryKey !== queryKey
 
   // 5. Metadata filter options state
   const [filterOptions, setFilterOptions] = useState<ProductFilterOptionsResponse | null>(null)
@@ -140,7 +158,14 @@ export function useProductCatalog() {
   const activeAbortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (priceError || overflowError) {
+    // Không gửi request nếu có lỗi validation hoặc categoryId đang chờ categories nạp để resolve type
+    if (
+      priceError ||
+      overflowError ||
+      invalidCategoryError ||
+      categoryNotFoundError ||
+      (filters.categoryId && isCategoriesLoading)
+    ) {
       return
     }
 
@@ -151,13 +176,10 @@ export function useProductCatalog() {
     const controller = new AbortController()
     activeAbortControllerRef.current = controller
 
-    // Làm sạch technical filters không áp dụng cho componentType hiện tại
-    const applicableFilters = filterApplicableTechnicalFilters(
-      filters,
-      effectiveComponentType
-    )
+    // Chuẩn bị tham số request với componentType hiệu lực và technical filters đã làm sạch
+    const queryParams = prepareProductQueryParams(filters, effectiveComponentType)
 
-    getProducts(applicableFilters, controller.signal)
+    getProducts(queryParams, controller.signal)
       .then((data) => {
         setPagedResult(data)
         setError(null)
@@ -174,7 +196,16 @@ export function useProductCatalog() {
     return () => {
       controller.abort()
     }
-  }, [queryKey, priceError, overflowError, filters, effectiveComponentType])
+  }, [
+    queryKey,
+    priceError,
+    overflowError,
+    invalidCategoryError,
+    categoryNotFoundError,
+    filters,
+    effectiveComponentType,
+    isCategoriesLoading,
+  ])
 
   // Clear limit warning sau 3 giây
   useEffect(() => {
@@ -190,27 +221,12 @@ export function useProductCatalog() {
     (newParams: Partial<ProductFilterParams>, resetPage = true) => {
       setSearchParams((prev) => {
         const currentParsed = parseFiltersFromUrl(prev).filters
-        const merged: ProductFilterParams = {
-          ...currentParsed,
-          ...newParams,
-        }
-
-        // Nếu thay đổi componentType, làm sạch category nếu không khớp và xóa technical filters cũ
-        if (newParams.componentType !== undefined && newParams.componentType !== currentParsed.componentType) {
-          if (merged.categoryId && categories.length > 0) {
-            const catType = inferComponentTypeFromCategory(categories, merged.categoryId)
-            if (catType !== undefined && catType !== newParams.componentType) {
-              merged.categoryId = undefined
-            }
-          }
-          const cleaned = filterApplicableTechnicalFilters(merged, newParams.componentType)
-          Object.assign(merged, cleaned)
-        }
-
-        if (resetPage) {
-          merged.pageIndex = 1
-        }
-
+        const merged = prepareCatalogFilterUpdate({
+          currentFilters: currentParsed,
+          newParams,
+          categories,
+          resetPage,
+        })
         return buildProductFilterSearchParams(merged)
       })
     },
@@ -219,38 +235,25 @@ export function useProductCatalog() {
 
   const toggleFilterChoice = useCallback(
     (groupKey: string, value: string | number) => {
+      const currentArray =
+        (filters[groupKey as keyof ParsedProductCatalogFilters] as (string | number)[]) ?? []
+      const result = toggleArrayFilterChoice(currentArray, value)
+      if (result.isRejected) {
+        setLimitWarning(result.warning)
+        return
+      }
+
       setSearchParams((prev) => {
         const currentParsed = parseFiltersFromUrl(prev).filters
-        const currentArray = (currentParsed[groupKey as keyof ParsedProductCatalogFilters] as (string | number)[]) ?? []
-        const valueKey = typeof value === 'number' ? value : String(value).toLowerCase()
-
-        const isCurrentlyChecked = currentArray.some((item) =>
-          typeof item === 'number' ? item === value : item.toLowerCase() === valueKey
-        )
-
-        let nextArray: (string | number)[]
-        if (isCurrentlyChecked) {
-          nextArray = currentArray.filter((item) =>
-            typeof item === 'number' ? item !== value : item.toLowerCase() !== valueKey
-          )
-        } else {
-          if (currentArray.length >= MAX_FILTER_VALUES_PER_GROUP) {
-            setLimitWarning(`Mỗi nhóm chỉ được chọn tối đa ${MAX_FILTER_VALUES_PER_GROUP} giá trị.`)
-            return prev
-          }
-          nextArray = [...currentArray, value]
-        }
-
         const merged: ProductFilterParams = {
           ...currentParsed,
-          [groupKey]: nextArray,
+          [groupKey]: result.nextValues,
           pageIndex: 1,
         }
-
         return buildProductFilterSearchParams(merged)
       })
     },
-    [setSearchParams]
+    [filters, setSearchParams]
   )
 
   const clearFilterGroup = useCallback(
@@ -304,6 +307,8 @@ export function useProductCatalog() {
     error,
     priceError,
     overflowError,
+    invalidCategoryError,
+    categoryNotFoundError,
     limitWarning,
     filters,
     effectiveComponentType,

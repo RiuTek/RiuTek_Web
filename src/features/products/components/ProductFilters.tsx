@@ -3,7 +3,6 @@ import {
   Search,
   RotateCcw,
   SlidersHorizontal,
-  ChevronRight,
   Layers,
   X,
   AlertCircle,
@@ -127,32 +126,42 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
     }
   }
 
-  // Danh mục phân cấp
-  const renderCategoryItem = (cat: Category, level = 0) => {
+  // Danh mục phân cấp dạng checkbox input
+  const renderCategoryItem = (cat: Category, level = 0, idPrefix: 'desktop' | 'mobile' = 'desktop') => {
     const isSelected = filters.categoryId === cat.id
+    const inputId = `${idPrefix}-category-${cat.id}`
     return (
-      <div key={cat.id} className="space-y-1">
-        <button
-          type="button"
-          onClick={() => {
-            onUpdateFilters({
-              categoryId: isSelected ? undefined : cat.id,
-            })
-          }}
-          className={`w-full text-left flex items-center justify-between text-xs py-1.5 px-2 rounded-lg transition-colors cursor-pointer ${
+      <div key={cat.id} className="space-y-0.5">
+        <div
+          className={`flex items-center gap-2 py-1 px-2 rounded-lg transition-colors ${
             isSelected
               ? 'bg-red-50 text-red-600 font-bold'
-              : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900'
+              : 'text-slate-700 hover:bg-slate-50'
           }`}
           style={{ paddingLeft: `${Math.max(8, level * 16 + 8)}px` }}
         >
-          <span className="truncate">{cat.name}</span>
-          {isSelected && <ChevronRight className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />}
-        </button>
+          <input
+            type="checkbox"
+            id={inputId}
+            checked={isSelected}
+            onChange={() =>
+              onUpdateFilters({
+                categoryId: isSelected ? undefined : cat.id,
+              })
+            }
+            className="w-3.5 h-3.5 text-red-600 rounded border-slate-300 focus:ring-red-500 cursor-pointer"
+          />
+          <label
+            htmlFor={inputId}
+            className="text-xs flex-1 truncate cursor-pointer select-none"
+          >
+            {cat.name}
+          </label>
+        </div>
 
         {cat.subCategories && cat.subCategories.length > 0 && (
           <div className="space-y-0.5">
-            {cat.subCategories.map((sub) => renderCategoryItem(sub, level + 1))}
+            {cat.subCategories.map((sub) => renderCategoryItem(sub, level + 1, idPrefix))}
           </div>
         )}
       </div>
@@ -226,55 +235,36 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
         </form>
       </div>
 
-      {/* 2. Loại Linh Kiện (Component Type) */}
-      <div className="border-b border-slate-200/80 pb-4 pt-1">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-red-600" />
-            <span>Loại linh kiện</span>
-          </span>
-          {filters.componentType && (
-            <button
-              type="button"
-              onClick={() => onUpdateFilters({ componentType: undefined })}
-              className="text-xs text-red-600 hover:underline font-semibold"
-            >
-              Bỏ chọn
-            </button>
-          )}
+      {/* Scope banner hiển thị nếu vào từ link type-only cũ (không có categoryId) */}
+      {filters.componentType && !filters.categoryId && (
+        <div className="p-2.5 bg-red-50/70 border border-red-200/80 rounded-xl text-xs flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-red-700">
+            <Layers className="w-3.5 h-3.5 text-red-600 flex-shrink-0" />
+            <span className="font-medium">
+              Lọc theo loại: <strong className="font-bold">{COMPONENT_TYPE_LABELS[filters.componentType]?.split('(')[0].trim()}</strong>
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onUpdateFilters({ componentType: undefined })}
+            className="text-[11px] text-red-600 hover:underline font-semibold"
+          >
+            Bỏ chọn
+          </button>
         </div>
-        <div className="grid grid-cols-2 gap-1.5">
-          {Object.entries(COMPONENT_TYPE_LABELS).map(([value, label]) => {
-            const typeNum = parseInt(value, 10) as ComponentType
-            const isSelected = filters.componentType === typeNum
-            return (
-              <button
-                key={value}
-                type="button"
-                onClick={() =>
-                  onUpdateFilters({
-                    componentType: isSelected ? undefined : typeNum,
-                  })
-                }
-                className={`text-left text-xs py-1.5 px-2 rounded-lg transition-all border ${
-                  isSelected
-                    ? 'bg-red-600 text-white font-bold border-red-600 shadow-xs'
-                    : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <span className="truncate block">{label.split('(')[0].trim()}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
+      )}
 
-      {/* 3. Danh Mục Sản Phẩm (Category Tree) */}
+      {/* 2. Danh Mục Sản Phẩm (Category Tree - Input Checkbox Đơn Chọn) */}
       <div className="border-b border-slate-200/80 pb-4">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-            Danh Mục
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+              Danh Mục
+            </span>
+            <span className="text-[10px] text-slate-400 font-normal">
+              (Chọn một mục)
+            </span>
+          </div>
           {filters.categoryId && (
             <button
               type="button"
@@ -301,8 +291,32 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
         )}
 
         {!isCategoriesLoading && !categoriesError && (
-          <div className="max-h-48 overflow-y-auto space-y-0.5 pr-1">
-            {categories.map((cat) => renderCategoryItem(cat))}
+          <div className="max-h-56 overflow-y-auto space-y-0.5 pr-1">
+            {/* Lựa chọn Tất cả danh mục */}
+            <div
+              className={`flex items-center gap-2 py-1 px-2 rounded-lg transition-colors mb-1 ${
+                !filters.categoryId
+                  ? 'bg-red-50 text-red-600 font-bold'
+                  : 'text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <input
+                type="checkbox"
+                id={`${idPrefix}-cat-all`}
+                checked={!filters.categoryId}
+                onChange={() => onUpdateFilters({ categoryId: undefined })}
+                className="w-3.5 h-3.5 text-red-600 rounded border-slate-300 focus:ring-red-500 cursor-pointer"
+              />
+              <label
+                htmlFor={`${idPrefix}-cat-all`}
+                className="text-xs flex-1 truncate cursor-pointer select-none"
+              >
+                Tất cả danh mục
+              </label>
+            </div>
+
+            {/* Cây danh mục */}
+            {categories.map((cat) => renderCategoryItem(cat, 0, idPrefix))}
           </div>
         )}
       </div>
