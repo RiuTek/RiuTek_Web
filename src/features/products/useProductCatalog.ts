@@ -22,11 +22,18 @@ import type {
 
 export type ParsedFilters = ParsedProductCatalogFilters
 
-// Singleton coordinator cho phép lưu cache trong phiên render của client
-const optionsCoordinator = new ProductFilterOptionsCoordinator()
+export interface OptionsScopeSnapshot {
+  scopeKey: string
+  status: 'idle' | 'loading' | 'success' | 'error'
+  data: ProductFilterOptionsResponse | null
+  error: Error | null
+}
 
 export function useProductCatalog() {
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Coordinator độc lập cho mỗi consumer instance
+  const [optionsCoordinator] = useState(() => new ProductFilterOptionsCoordinator())
 
   // 1. Categories state
   const [categories, setCategories] = useState<Category[]>([])
@@ -97,12 +104,53 @@ export function useProductCatalog() {
 
   const isLoading = !isScopeBlocked && completedQueryKey !== queryKey
 
-  // 5. Metadata filter options state
-  const [filterOptions, setFilterOptions] = useState<ProductFilterOptionsResponse | null>(null)
-  const [isFilterOptionsLoading, setIsFilterOptionsLoading] = useState(false)
-  const [filterOptionsError, setFilterOptionsError] = useState<Error | null>(null)
+  // 5. Metadata filter options state & identity snapshot
+  const [optionsSnapshot, setOptionsSnapshot] = useState<OptionsScopeSnapshot>({
+    scopeKey: '',
+    status: 'idle',
+    data: null,
+    error: null,
+  })
   const [optionsRetryTrigger, setOptionsRetryTrigger] = useState(0)
   const [limitWarning, setLimitWarning] = useState<string | null>(null)
+
+  // Scope parameters & key để định danh options thuộc đúng phạm vi
+  const currentScopeParams = useMemo(
+    () => ({
+      componentType: effectiveComponentType,
+      categoryId: filters.categoryId || undefined,
+      isActive: filters.isActive,
+      inStock: filters.inStock,
+    }),
+    [effectiveComponentType, filters.categoryId, filters.isActive, filters.inStock]
+  )
+
+  const currentScopeKey = useMemo(() => {
+    return optionsCoordinator.getScopeKey(currentScopeParams)
+  }, [optionsCoordinator, currentScopeParams])
+
+  // Phân giải options đồng bộ ngay trong render phase:
+  // Nếu snapshot chưa khớp scopeKey hiện tại -> không bao giờ để lộ options cũ từ scope khác
+  const cachedOptions = optionsCoordinator.getCached(currentScopeKey)
+  const isSnapshotMatching = optionsSnapshot.scopeKey === currentScopeKey
+
+  const effectiveFilterOptions = isScopeBlocked
+    ? null
+    : isSnapshotMatching
+      ? optionsSnapshot.data
+      : (cachedOptions ?? null)
+
+  const isFilterOptionsLoading = isScopeBlocked
+    ? false
+    : isSnapshotMatching
+      ? optionsSnapshot.status === 'loading'
+      : !cachedOptions
+
+  const filterOptionsError = isScopeBlocked
+    ? null
+    : isSnapshotMatching
+      ? optionsSnapshot.error
+      : null
 
   // 6. Fetch Categories một lần lúc mount (có hỗ trợ retry)
   useEffect(() => {
@@ -134,34 +182,45 @@ export function useProductCatalog() {
   // 7. Load Metadata Options theo 4 scope params (có sequence & scope guard)
   useEffect(() => {
     if (isScopeBlocked) {
+      optionsCoordinator.abort()
       return
-    }
-
-    const scopeParams = {
-      componentType: effectiveComponentType,
-      categoryId: filters.categoryId || undefined,
-      isActive: filters.isActive,
-      inStock: filters.inStock,
     }
 
     let isMounted = true
 
     optionsCoordinator.loadOptions(
-      scopeParams,
+      currentScopeParams,
       (data) => {
         if (isMounted) {
-          setFilterOptions(data)
-          setFilterOptionsError(null)
+          setOptionsSnapshot({
+            scopeKey: currentScopeKey,
+            status: 'success',
+            data,
+            error: null,
+          })
         }
       },
       (err) => {
         if (isMounted) {
-          setFilterOptionsError(err)
+          setOptionsSnapshot({
+            scopeKey: currentScopeKey,
+            status: 'error',
+            data: null,
+            error: err,
+          })
         }
       },
       (loading) => {
-        if (isMounted) {
-          setIsFilterOptionsLoading(loading)
+        if (isMounted && loading) {
+          setOptionsSnapshot((prev) => {
+            if (prev.scopeKey === currentScopeKey && prev.status === 'loading') return prev
+            return {
+              scopeKey: currentScopeKey,
+              status: 'loading',
+              data: optionsCoordinator.getCached(currentScopeKey) ?? null,
+              error: null,
+            }
+          })
         }
       }
     )
@@ -171,10 +230,9 @@ export function useProductCatalog() {
     }
   }, [
     isScopeBlocked,
-    effectiveComponentType,
-    filters.categoryId,
-    filters.isActive,
-    filters.inStock,
+    currentScopeParams,
+    currentScopeKey,
+    optionsCoordinator,
     optionsRetryTrigger,
   ])
 
@@ -322,8 +380,15 @@ export function useProductCatalog() {
   }, [])
 
   const retryFilterOptions = useCallback(() => {
+    optionsCoordinator.clearCache(currentScopeKey)
+    setOptionsSnapshot({
+      scopeKey: currentScopeKey,
+      status: 'loading',
+      data: null,
+      error: null,
+    })
     setOptionsRetryTrigger((prev) => prev + 1)
-  }, [])
+  }, [optionsCoordinator, currentScopeKey])
 
   const displayedPagedResult = isScopeBlocked ? null : pagedResult
   const displayedProducts = displayedPagedResult?.items ?? []
@@ -344,9 +409,9 @@ export function useProductCatalog() {
     limitWarning,
     filters,
     effectiveComponentType,
-    filterOptions: isScopeBlocked ? null : filterOptions,
-    isFilterOptionsLoading: isScopeBlocked ? false : isFilterOptionsLoading,
-    filterOptionsError: isScopeBlocked ? null : filterOptionsError,
+    filterOptions: effectiveFilterOptions,
+    isFilterOptionsLoading,
+    filterOptionsError,
     updateFilters,
     toggleFilterChoice,
     clearFilterGroup,

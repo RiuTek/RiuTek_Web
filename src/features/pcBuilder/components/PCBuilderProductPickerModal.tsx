@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import {
   Search,
   RotateCcw,
@@ -109,13 +109,49 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   const [completedKey, setCompletedKey] = useState<string | null>(null)
   const [retryTrigger, setRetryTrigger] = useState(0)
 
-  // Filter options metadata state
-  const [filterOptions, setFilterOptions] = useState<ProductFilterOptionsResponse | null>(null)
-  const [isOptionsLoading, setIsOptionsLoading] = useState(false)
-  const [optionsError, setOptionsError] = useState<Error | null>(null)
+  // Filter options metadata state & snapshot
+  const [optionsSnapshot, setOptionsSnapshot] = useState<{
+    scopeKey: string
+    status: 'idle' | 'loading' | 'success' | 'error'
+    data: ProductFilterOptionsResponse | null
+    error: Error | null
+  }>({
+    scopeKey: '',
+    status: 'idle',
+    data: null,
+    error: null,
+  })
   const [optionsRetryTrigger, setOptionsRetryTrigger] = useState(0)
-  const optionsCoordinatorRef = useRef(new ProductFilterOptionsCoordinator())
+  const [optionsCoordinator] = useState(() => new ProductFilterOptionsCoordinator())
   const [limitWarning, setLimitWarning] = useState<string | null>(null)
+
+  const modalScopeParams = useMemo(
+    () => ({
+      componentType: activeSlot,
+      inStock: inStockFilter === 'true' ? true : inStockFilter === 'false' ? false : undefined,
+      isActive: isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
+    }),
+    [activeSlot, inStockFilter, isActiveFilter]
+  )
+
+  const currentScopeKey = useMemo(() => {
+    return optionsCoordinator.getScopeKey(modalScopeParams)
+  }, [optionsCoordinator, modalScopeParams])
+
+  const cachedOptions = optionsCoordinator.getCached(currentScopeKey)
+  const isMatchingScope = optionsSnapshot.scopeKey === currentScopeKey
+
+  const effectiveFilterOptions = isMatchingScope
+    ? optionsSnapshot.data
+    : (cachedOptions ?? null)
+
+  const effectiveIsOptionsLoading = isMatchingScope
+    ? optionsSnapshot.status === 'loading'
+    : !cachedOptions
+
+  const effectiveOptionsError = isMatchingScope
+    ? optionsSnapshot.error
+    : null
 
   useEffect(() => {
     if (!limitWarning) return
@@ -195,33 +231,59 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
   // Load Filter Options cho activeSlot
   useEffect(() => {
     let isMounted = true
-    const coordinator = optionsCoordinatorRef.current
-    const scope = {
-      componentType: activeSlot,
-      inStock: inStockFilter === 'true' ? true : inStockFilter === 'false' ? false : undefined,
-      isActive: isActiveFilter === 'true' ? true : isActiveFilter === 'false' ? false : undefined,
-    }
 
-    coordinator.loadOptions(
-      scope,
+    optionsCoordinator.loadOptions(
+      modalScopeParams,
       (data) => {
         if (isMounted) {
-          setFilterOptions(data)
-          setOptionsError(null)
+          setOptionsSnapshot({
+            scopeKey: currentScopeKey,
+            status: 'success',
+            data,
+            error: null,
+          })
         }
       },
       (err) => {
-        if (isMounted) setOptionsError(err)
+        if (isMounted) {
+          setOptionsSnapshot({
+            scopeKey: currentScopeKey,
+            status: 'error',
+            data: null,
+            error: err,
+          })
+        }
       },
       (loading) => {
-        if (isMounted) setIsOptionsLoading(loading)
+        if (isMounted && loading) {
+          setOptionsSnapshot((prev) => {
+            if (prev.scopeKey === currentScopeKey && prev.status === 'loading') return prev
+            return {
+              scopeKey: currentScopeKey,
+              status: 'loading',
+              data: optionsCoordinator.getCached(currentScopeKey) ?? null,
+              error: null,
+            }
+          })
+        }
       }
     )
 
     return () => {
       isMounted = false
     }
-  }, [activeSlot, inStockFilter, isActiveFilter, optionsRetryTrigger])
+  }, [optionsCoordinator, modalScopeParams, currentScopeKey, optionsRetryTrigger])
+
+  const handleRetryOptions = useCallback(() => {
+    optionsCoordinator.clearCache(currentScopeKey)
+    setOptionsSnapshot({
+      scopeKey: currentScopeKey,
+      status: 'loading',
+      data: null,
+      error: null,
+    })
+    setOptionsRetryTrigger((prev) => prev + 1)
+  }, [optionsCoordinator, currentScopeKey])
 
   const handleToggleTechnicalChoice = (key: string, value: string | number) => {
     const current = (technicalFilters[key as keyof PCBuilderTechnicalFilterState] as (string | number)[]) ?? []
@@ -631,13 +693,13 @@ export const PCBuilderProductPickerModal: React.FC<PCBuilderProductPickerModalPr
             <PCBuilderTechnicalFilters
               activeSlot={activeSlot}
               technicalFilters={technicalFilters}
-              filterOptions={filterOptions}
-              isOptionsLoading={isOptionsLoading}
-              optionsError={optionsError}
+              filterOptions={effectiveFilterOptions}
+              isOptionsLoading={effectiveIsOptionsLoading}
+              optionsError={effectiveOptionsError}
               onToggleChoice={handleToggleTechnicalChoice}
               onClearGroup={handleClearTechnicalGroup}
               onChangeBoolean={handleChangeBooleanFilter}
-              onRetryOptions={() => setOptionsRetryTrigger((prev) => prev + 1)}
+              onRetryOptions={handleRetryOptions}
               onChange={handleTechnicalFilterChange}
             />
           </div>

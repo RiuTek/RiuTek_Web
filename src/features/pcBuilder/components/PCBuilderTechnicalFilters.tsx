@@ -83,21 +83,41 @@ export const PCBuilderTechnicalFilters: React.FC<PCBuilderTechnicalFiltersProps>
     }
   }
 
+  const booleanKeys = applicableKeys.filter((k) => (BOOLEAN_FILTER_KEYS as readonly string[]).includes(k))
+  const metadataKeys = applicableKeys.filter((k) => !(BOOLEAN_FILTER_KEYS as readonly string[]).includes(k))
+
   return (
     <div className="pt-3 border-t border-slate-200 space-y-3">
       <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
         Thông số kỹ thuật
       </div>
 
-      {isOptionsLoading && (
+      {/* Boolean Filters tĩnh (luôn hiển thị theo activeSlot) */}
+      {booleanKeys.length > 0 && (
+        <div className="space-y-1">
+          {booleanKeys.map((groupKey) => {
+            const title = getGroupTitle(groupKey, activeSlot)
+            const currentVal = technicalFilters[groupKey as keyof PCBuilderTechnicalFilterState] as boolean | undefined
+            return (
+              <ProductBooleanFilterGroup
+                key={groupKey}
+                title={title}
+                value={currentVal}
+                onChange={(val) => handleBool(groupKey, val)}
+              />
+            )
+          })}
+        </div>
+      )}
+
+      {/* Metadata Filters (Hãng & Metadata groups từ API) */}
+      {isOptionsLoading ? (
         <div className="space-y-2 py-2">
           <div className="h-4 bg-slate-200 rounded animate-pulse w-2/3" />
           <div className="h-4 bg-slate-100 rounded animate-pulse w-full" />
           <div className="h-4 bg-slate-100 rounded animate-pulse w-4/5" />
         </div>
-      )}
-
-      {optionsError && (
+      ) : optionsError ? (
         <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
           <p className="text-slate-600">Không nạp được thông số kỹ thuật.</p>
           {onRetryOptions && (
@@ -111,9 +131,7 @@ export const PCBuilderTechnicalFilters: React.FC<PCBuilderTechnicalFiltersProps>
             </button>
           )}
         </div>
-      )}
-
-      {!isOptionsLoading && (
+      ) : (
         <div className="space-y-1">
           {/* Hãng sản xuất nếu có trong filterOptions */}
           {filterOptions?.brands && filterOptions.brands.length > 0 && (
@@ -128,23 +146,9 @@ export const PCBuilderTechnicalFilters: React.FC<PCBuilderTechnicalFiltersProps>
             />
           )}
 
-          {/* Các nhóm kỹ thuật áp dụng */}
-          {applicableKeys.map((groupKey) => {
-            const isBoolean = (BOOLEAN_FILTER_KEYS as readonly string[]).includes(groupKey)
+          {/* Các nhóm kỹ thuật metadata */}
+          {metadataKeys.map((groupKey) => {
             const title = getGroupTitle(groupKey, activeSlot)
-
-            if (isBoolean) {
-              const currentVal = technicalFilters[groupKey as keyof PCBuilderTechnicalFilterState] as boolean | undefined
-              return (
-                <ProductBooleanFilterGroup
-                  key={groupKey}
-                  title={title}
-                  value={currentVal}
-                  onChange={(val) => handleBool(groupKey, val)}
-                />
-              )
-            }
-
             const groupMetadata = filterOptions?.groups?.find((g) => g.key === groupKey)
             const options = groupMetadata ? groupMetadata.values : []
             const currentSelected = (technicalFilters[groupKey as keyof PCBuilderTechnicalFilterState] as (string | number)[]) ?? []

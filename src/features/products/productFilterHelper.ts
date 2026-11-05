@@ -815,7 +815,11 @@ export class ProductFilterOptionsCoordinator {
   private sequence = 0
 
   public getScopeKey(params: GetProductFilterOptionsParams): string {
-    return `${params.componentType ?? ''}:${params.categoryId ?? ''}:${params.isActive ?? ''}:${params.inStock ?? ''}`
+    const t = params.componentType !== undefined ? String(params.componentType) : ''
+    const c = params.categoryId && params.categoryId.trim() ? params.categoryId.trim() : ''
+    const a = params.isActive === undefined ? '' : String(params.isActive)
+    const s = params.inStock === undefined ? '' : String(params.inStock)
+    return `${t}:${c}:${a}:${s}`
   }
 
   public getCached(scopeKey: string): ProductFilterOptionsResponse | undefined {

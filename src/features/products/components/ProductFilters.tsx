@@ -442,13 +442,16 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
       </div>
 
       {/* 6. Technical Groups theo ComponentType hiện tại */}
-      {effectiveComponentType && (
-        <div className="space-y-1">
-          {TECHNICAL_GROUPS_BY_TYPE[effectiveComponentType]?.map((groupKey) => {
-            const isBoolean = (BOOLEAN_FILTER_KEYS as readonly string[]).includes(groupKey)
-            const title = getGroupTitle(groupKey, effectiveComponentType)
+      {effectiveComponentType && (() => {
+        const applicableKeys = TECHNICAL_GROUPS_BY_TYPE[effectiveComponentType] ?? []
+        const booleanKeys = applicableKeys.filter((k) => (BOOLEAN_FILTER_KEYS as readonly string[]).includes(k))
+        const metadataKeys = applicableKeys.filter((k) => !(BOOLEAN_FILTER_KEYS as readonly string[]).includes(k))
 
-            if (isBoolean) {
+        return (
+          <div className="space-y-1">
+            {/* Boolean filters tĩnh (luôn hiển thị theo componentType) */}
+            {booleanKeys.map((groupKey) => {
+              const title = getGroupTitle(groupKey, effectiveComponentType)
               const currentVal = filters[groupKey as keyof ParsedProductCatalogFilters] as boolean | undefined
               return (
                 <ProductBooleanFilterGroup
@@ -458,29 +461,58 @@ export const ProductFilters: React.FC<ProductFiltersProps> = ({
                   onChange={(val) => onUpdateFilters({ [groupKey]: val })}
                 />
               )
-            }
+            })}
 
-            // Numeric hoặc Enum group từ filterOptions
-            const groupMetadata = filterOptions?.groups?.find((g) => g.key === groupKey)
-            const options = groupMetadata ? groupMetadata.values : []
-            const currentSelected = (filters[groupKey as keyof ParsedProductCatalogFilters] as (string | number)[]) ?? []
+            {/* Metadata-driven groups (numeric/enum metadata từ API) */}
+            {metadataKeys.length > 0 && (
+              isFilterOptionsLoading ? (
+                <div className="border-b border-slate-200/80 pb-4 pt-2 space-y-2">
+                  <div className="h-3.5 bg-slate-200 rounded w-1/3 animate-pulse" />
+                  <div className="h-4 bg-slate-100 rounded w-full animate-pulse" />
+                  <div className="h-4 bg-slate-100 rounded w-4/5 animate-pulse" />
+                </div>
+              ) : filterOptionsError ? (
+                <div className="border-b border-slate-200/80 pb-4 pt-2">
+                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1.5">
+                    <p className="text-slate-600">Không nạp được thông số kỹ thuật.</p>
+                    {onRetryFilterOptions && (
+                      <button
+                        type="button"
+                        onClick={onRetryFilterOptions}
+                        className="inline-flex items-center gap-1 text-red-600 font-bold hover:underline cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Thử lại</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                metadataKeys.map((groupKey) => {
+                  const title = getGroupTitle(groupKey, effectiveComponentType)
+                  const groupMetadata = filterOptions?.groups?.find((g) => g.key === groupKey)
+                  const options = groupMetadata ? groupMetadata.values : []
+                  const currentSelected = (filters[groupKey as keyof ParsedProductCatalogFilters] as (string | number)[]) ?? []
 
-            return (
-              <ProductCheckboxGroup
-                key={groupKey}
-                title={title}
-                groupKey={groupKey}
-                options={options}
-                selectedValues={currentSelected}
-                onToggle={(val) => onToggleChoice(groupKey, val)}
-                onClear={() => onClearGroup(groupKey)}
-                componentType={effectiveComponentType}
-                emptyMessage="Không có thông số tương ứng"
-              />
-            )
-          })}
-        </div>
-      )}
+                  return (
+                    <ProductCheckboxGroup
+                      key={groupKey}
+                      title={title}
+                      groupKey={groupKey}
+                      options={options}
+                      selectedValues={currentSelected}
+                      onToggle={(val) => onToggleChoice(groupKey, val)}
+                      onClear={() => onClearGroup(groupKey)}
+                      componentType={effectiveComponentType}
+                      emptyMessage="Không có thông số tương ứng"
+                    />
+                  )
+                })
+              )
+            )}
+          </div>
+        )
+      })()}
 
       {/* 7. Trạng Thái & Tồn Kho */}
       <div className="border-b border-slate-200/80 pb-4 pt-1 space-y-3">
