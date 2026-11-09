@@ -22,7 +22,17 @@ RiuTek is a personal e-commerce project for buying PC components and choosing pa
 
 > **Try it online** — Browse components and export a PC build without an account at [riutek.store](https://riutek.store). Sign in to save builds and try checkout. Stripe uses test mode.
 
-[Features](#features) · [Technology](#technology) · [API integration](#api-and-authentication) · [Setup](#run-locally) · [Build](#checks-and-build) · [Roadmap](#roadmap)
+[Screenshots](#screenshots) · [Features](#features) · [Technology](#technology) · [API integration](#api-and-authentication) · [Setup](#run-locally) · [Build](#checks-and-build) · [Roadmap](#roadmap)
+
+## Screenshots
+
+**PC Builder**
+
+![CPU picker in the RiuTek PC Builder](docs/screenshots/pc-builder.jpg)
+
+| Catalog filters | Product detail |
+| :---: | :---: |
+| [![GPU catalog filtered by Sapphire](docs/screenshots/catalog-filters.jpg)](docs/screenshots/catalog-filters.jpg) | [![Sapphire RX 7900 GRE product page](docs/screenshots/product-detail.jpg)](docs/screenshots/product-detail.jpg) |
 
 ## Features
 
