@@ -236,8 +236,14 @@ function AiChat() {
               <textarea
                 ref={input}
                 aria-label="Câu hỏi tư vấn"
+                aria-keyshortcuts="Enter"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return
+                  event.preventDefault()
+                  if (!event.repeat) event.currentTarget.form?.requestSubmit()
+                }}
                 readOnly={!!pendingQuestion}
                 rows={2}
                 maxLength={AI_MESSAGE_LIMIT}
