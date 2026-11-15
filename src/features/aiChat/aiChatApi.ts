@@ -18,6 +18,7 @@ export interface AiChatReply {
     priceVnd: number
     inStock: boolean
     isActive: boolean
+    imageUrl?: string | null
   }[]
   sources: {
     kind: 'catalog' | 'manufacturer' | 'faq'

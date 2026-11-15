@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { ExternalLink, LoaderCircle, MessageCircle, Minus, Send, Sparkles } from 'lucide-react'
+import { ExternalLink, LoaderCircle, MessageCircle, Minus, Package, Send, Sparkles } from 'lucide-react'
 import { Link, useMatch } from 'react-router-dom'
 import { executeWithAdminAuth, isContentManagerRole } from '../admin/adminGuardHelper'
 import { useAuth } from '../auth/AuthContext'
@@ -13,7 +13,7 @@ interface ChatTurn {
   reply: AiChatReply
 }
 
-function sourceLink(value: string | null) {
+function httpsUrl(value: string | null | undefined) {
   if (!value) return null
   try {
     const url = new URL(value)
@@ -32,6 +32,22 @@ function chatError(error: unknown) {
   return 'Tư vấn AI đang gián đoạn. Bạn có thể gửi lại câu hỏi sau ít phút.'
 }
 
+function ProductThumbnail({ url }: { url?: string | null }) {
+  const [failed, setFailed] = useState(false)
+  const src = httpsUrl(url)
+
+  return (
+    <span className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
+      {src && !failed ? (
+        <img src={src} alt="" width={48} height={48} loading="lazy" decoding="async"
+          className="size-full object-contain" onError={() => setFailed(true)} />
+      ) : (
+        <Package className="size-5 text-slate-400" aria-hidden="true" />
+      )}
+    </span>
+  )
+}
+
 function ChatReply({ reply }: { reply: AiChatReply }) {
   return (
     <div className="space-y-3 rounded-2xl rounded-tl-sm bg-slate-100 px-3.5 py-3 text-sm text-slate-800">
@@ -42,13 +58,16 @@ function ChatReply({ reply }: { reply: AiChatReply }) {
             <li key={product.sku}>
               <Link
                 to={`/products/${encodeURIComponent(product.slug)}`}
-                className="block rounded-xl border border-slate-200 bg-white p-3 hover:border-red-300"
+                className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 hover:border-red-300"
               >
-                <span className="block wrap-break-word font-semibold text-slate-900">{product.name}</span>
-                <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                  <span className="font-semibold text-red-700">{formatVnd(product.priceVnd)}</span>
-                  <span className={product.isActive && product.inStock ? 'text-emerald-800' : 'text-slate-600'}>
-                    {product.isActive ? (product.inStock ? 'Còn hàng' : 'Hết hàng') : 'Ngừng bán'}
+                <ProductThumbnail key={product.imageUrl} url={product.imageUrl} />
+                <span className="min-w-0">
+                  <span className="block wrap-break-word font-semibold text-slate-900">{product.name}</span>
+                  <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                    <span className="font-semibold text-red-700">{formatVnd(product.priceVnd)}</span>
+                    <span className={product.isActive && product.inStock ? 'text-emerald-800' : 'text-slate-600'}>
+                      {product.isActive ? (product.inStock ? 'Còn hàng' : 'Hết hàng') : 'Ngừng bán'}
+                    </span>
                   </span>
                 </span>
               </Link>
@@ -61,7 +80,7 @@ function ChatReply({ reply }: { reply: AiChatReply }) {
           <p className="mb-1 font-semibold">Nguồn tham khảo</p>
           <ul className="space-y-1">
             {reply.sources.map((source, index) => {
-              const href = sourceLink(source.url)
+              const href = httpsUrl(source.url)
               return (
                 <li key={index} className="wrap-break-word">
                   {href ? (
@@ -95,6 +114,7 @@ function AiChat() {
   const productSlug = slug && slug.length <= 200 ? slug : undefined
   const panelId = useId()
   const [open, setOpen] = useState(false)
+  const [hasOpened, setHasOpened] = useState(false)
   const [draft, setDraft] = useState('')
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [pendingQuestion, setPendingQuestion] = useState('')
@@ -237,11 +257,22 @@ function AiChat() {
         type="button"
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
-        onClick={() => open ? minimize() : setOpen(true)}
-        className="pointer-events-auto flex min-h-11 items-center gap-2 rounded-full bg-red-700 px-4 text-sm font-semibold text-white shadow-lg hover:bg-red-800"
+        onClick={() => {
+          if (open) minimize()
+          else {
+            setHasOpened(true)
+            setOpen(true)
+          }
+        }}
+        className="pointer-events-auto flex h-12 items-center gap-2 rounded-full bg-red-700 px-3 text-sm font-semibold text-white shadow-lg shadow-red-900/25 ring-2 ring-red-200 ring-offset-2 hover:bg-red-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-red-700"
       >
-        {open ? <Minus size={18} aria-hidden="true" /> : <MessageCircle size={18} aria-hidden="true" />}
-        {open ? 'Thu gọn' : 'Tư vấn AI'}
+        <span className="relative grid size-8 shrink-0 place-items-center rounded-full bg-white/15">
+          {open ? <Minus size={18} aria-hidden="true" /> : <MessageCircle size={18} aria-hidden="true" />}
+          {!hasOpened && (
+            <Sparkles className="absolute -right-1 -top-1 size-3 text-amber-200 motion-safe:animate-[pulse_1.2s_ease-in-out_3]" aria-hidden="true" />
+          )}
+        </span>
+        <span className="pr-1">{open ? 'Thu gọn' : 'Hỏi tư vấn AI'}</span>
       </button>
     </aside>
   )
