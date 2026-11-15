@@ -8,18 +8,33 @@ export interface AiChatMessage {
   content: string
 }
 
+export interface AiChatProduct {
+  sku: string
+  name: string
+  slug: string
+  priceVnd: number
+  inStock: boolean
+  isActive: boolean
+  imageUrl?: string | null
+}
+
+export interface AiBuildItem {
+  product: AiChatProduct
+  component: string
+  reason: string
+  alreadyOwned: boolean
+}
+
 export interface AiChatReply {
   status: 'answered' | 'partial' | 'needs_clarification' | 'insufficient_data' | 'out_of_scope'
   answer: string
-  products: {
-    sku: string
-    name: string
-    slug: string
-    priceVnd: number
-    inStock: boolean
-    isActive: boolean
-    imageUrl?: string | null
-  }[]
+  products: AiChatProduct[]
+  build?: {
+    budgetVnd: number
+    totalVnd: number
+    recommendedPsuWattage: number
+    items: AiBuildItem[]
+  } | null
   sources: {
     kind: 'catalog' | 'manufacturer' | 'faq'
     title: string

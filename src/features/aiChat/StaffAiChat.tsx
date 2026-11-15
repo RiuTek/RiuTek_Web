@@ -5,7 +5,7 @@ import { executeWithAdminAuth, isContentManagerRole } from '../admin/adminGuardH
 import { useAuth } from '../auth/AuthContext'
 import { formatVnd } from '../products/productConstants'
 import { ApiError } from '../../lib/api'
-import { AI_HISTORY_LIMIT, AI_MESSAGE_LIMIT, askAiChat, type AiChatReply } from './aiChatApi'
+import { AI_HISTORY_LIMIT, AI_MESSAGE_LIMIT, askAiChat, type AiBuildItem, type AiChatProduct, type AiChatReply } from './aiChatApi'
 
 interface ChatTurn {
   id: number
@@ -48,30 +48,59 @@ function ProductThumbnail({ url }: { url?: string | null }) {
   )
 }
 
+function ChatProduct({ product, buildItem }: { product: AiChatProduct; buildItem?: AiBuildItem }) {
+  return (
+    <Link
+      to={`/products/${encodeURIComponent(product.slug)}`}
+      className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 hover:border-red-300"
+    >
+      <ProductThumbnail key={product.imageUrl} url={product.imageUrl} />
+      <span className="min-w-0">
+        {buildItem && <span className="block text-xs font-medium text-slate-600">{buildItem.component}</span>}
+        <span className="block wrap-break-word font-semibold text-slate-900">{product.name}</span>
+        <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+          {buildItem?.alreadyOwned ? (
+            <span className="font-semibold text-slate-700">Bạn đã có</span>
+          ) : (
+            <>
+              <span className="font-semibold text-red-700">{formatVnd(product.priceVnd)}</span>
+              <span className={product.isActive && product.inStock ? 'text-emerald-800' : 'text-slate-600'}>
+                {product.isActive ? (product.inStock ? 'Còn hàng' : 'Hết hàng') : 'Ngừng bán'}
+              </span>
+            </>
+          )}
+        </span>
+        {buildItem && <span className="mt-1 block wrap-break-word text-xs text-slate-600">{buildItem.reason}</span>}
+      </span>
+    </Link>
+  )
+}
+
 function ChatReply({ reply }: { reply: AiChatReply }) {
+  const build = reply.build
   return (
     <div className="space-y-3 rounded-2xl rounded-tl-sm bg-slate-100 px-3.5 py-3 text-sm text-slate-800">
       <p className="whitespace-pre-wrap wrap-break-word leading-relaxed">{reply.answer}</p>
+      {build && (
+        <div className="space-y-2">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+            <p className="font-semibold text-slate-900">Cấu hình đề xuất</p>
+            <p className="mt-1 text-xs text-slate-700">
+              Giá linh kiện cần mua <strong>{formatVnd(build.totalVnd)}</strong> / {formatVnd(build.budgetVnd)}
+            </p>
+            <p className="mt-1 text-xs text-slate-700">Công suất nguồn khuyến nghị {build.recommendedPsuWattage} W</p>
+          </div>
+          <ul className="space-y-2">
+            {build.items.map((item) => (
+              <li key={item.product.sku}><ChatProduct product={item.product} buildItem={item} /></li>
+            ))}
+          </ul>
+        </div>
+      )}
       {reply.products.length > 0 && (
         <ul className="space-y-2">
           {reply.products.map((product) => (
-            <li key={product.sku}>
-              <Link
-                to={`/products/${encodeURIComponent(product.slug)}`}
-                className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-2.5 hover:border-red-300"
-              >
-                <ProductThumbnail key={product.imageUrl} url={product.imageUrl} />
-                <span className="min-w-0">
-                  <span className="block wrap-break-word font-semibold text-slate-900">{product.name}</span>
-                  <span className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                    <span className="font-semibold text-red-700">{formatVnd(product.priceVnd)}</span>
-                    <span className={product.isActive && product.inStock ? 'text-emerald-800' : 'text-slate-600'}>
-                      {product.isActive ? (product.inStock ? 'Còn hàng' : 'Hết hàng') : 'Ngừng bán'}
-                    </span>
-                  </span>
-                </span>
-              </Link>
-            </li>
+            <li key={product.sku}><ChatProduct product={product} /></li>
           ))}
         </ul>
       )}
@@ -122,6 +151,7 @@ function AiChat() {
   const request = useRef<AbortController | null>(null)
   const nextId = useRef(0)
   const log = useRef<HTMLDivElement>(null)
+  const latestBuildReply = useRef<HTMLDivElement>(null)
   const input = useRef<HTMLTextAreaElement>(null)
   const launcher = useRef<HTMLButtonElement>(null)
 
@@ -132,7 +162,13 @@ function AiChat() {
   }, [open])
 
   useEffect(() => {
-    if (open && log.current) log.current.scrollTop = log.current.scrollHeight
+    const viewport = log.current
+    if (!open || !viewport) return
+    if (!pendingQuestion && !error && latestBuildReply.current) {
+      viewport.scrollTop += latestBuildReply.current.getBoundingClientRect().top - viewport.getBoundingClientRect().top
+      return
+    }
+    viewport.scrollTop = viewport.scrollHeight
   }, [open, turns, pendingQuestion, error])
 
   function minimize() {
@@ -207,14 +243,16 @@ function AiChat() {
           </div>
           <div ref={log} role="log" aria-label="Cuộc trò chuyện" className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-3.5">
             <p className="rounded-2xl rounded-tl-sm bg-slate-100 p-3.5 text-sm leading-relaxed text-slate-700">
-              Dạ, bạn muốn hỏi về thông số, tình trạng hàng hay tìm linh kiện theo ngân sách?
+              Dạ, bạn muốn hỏi về linh kiện hay cần mình gợi ý một cấu hình PC theo ngân sách?
             </p>
-            {turns.map((turn) => (
+            {turns.map((turn, index) => (
               <div key={turn.id} className="space-y-2">
                 <p className="ml-8 rounded-2xl rounded-br-sm bg-red-700 px-3.5 py-2.5 text-sm whitespace-pre-wrap wrap-break-word text-white">
                   {turn.question}
                 </p>
-                <ChatReply reply={turn.reply} />
+                <div ref={turn.reply.build && index === turns.length - 1 ? latestBuildReply : undefined}>
+                  <ChatReply reply={turn.reply} />
+                </div>
               </div>
             ))}
             {pendingQuestion && (
