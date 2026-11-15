@@ -104,6 +104,7 @@ export interface PCBuilderProductItem {
 export interface SelectedPCBuildItem {
   product: PCBuilderProductItem
   quantity: number
+  alreadyOwned?: boolean
 }
 
 /**

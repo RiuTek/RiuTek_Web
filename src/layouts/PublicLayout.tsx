@@ -2,7 +2,7 @@ import React from 'react'
 import { Outlet } from 'react-router-dom'
 import { Header } from '../components/layout/Header'
 import { Footer } from '../components/layout/Footer'
-import { StaffAiChat } from '../features/aiChat/StaffAiChat'
+import { AiChatWidget } from '../features/aiChat/AiChatWidget'
 
 export const PublicLayout: React.FC = () => {
   return (
@@ -12,7 +12,7 @@ export const PublicLayout: React.FC = () => {
         <Outlet />
       </main>
       <Footer />
-      <StaffAiChat />
+      <AiChatWidget />
     </div>
   )
 }

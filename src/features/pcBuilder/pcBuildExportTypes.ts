@@ -18,6 +18,7 @@ export interface PCBuildExportItem {
   quantity: number
   unitPrice: number
   lineTotal: number
+  alreadyOwned?: boolean
 }
 
 /**
@@ -134,6 +135,7 @@ export function createSnapshotFromBuilder(params: {
     return a.productId.localeCompare(b.productId)
   })
 
+  const ownedIds = new Set(selectedItems.filter(item => item.alreadyOwned).map(item => item.product.id.toLowerCase()))
   const exportItems: PCBuildExportItem[] = sortedItems.map((item) => ({
     id: item.productId,
     name: item.name,
@@ -142,14 +144,17 @@ export function createSnapshotFromBuilder(params: {
     quantity: item.quantity,
     unitPrice: item.currentUnitPrice, // Giá đơn vị hiện tại từ server preview
     lineTotal: item.lineTotal,
+    ...(ownedIds.has(item.productId.toLowerCase()) ? { alreadyOwned: true } : {}),
   }))
 
   return {
     sourceType: 'builder',
     buildName: (buildName ?? '').trim() || 'Cấu hình PC của tôi',
     items: exportItems,
-    totalPrice: previewResult.totalPrice,
-    priceLabel: 'Tổng tạm tính (Giá hiện tại từ máy chủ)',
+    totalPrice: ownedIds.size > 0
+      ? exportItems.reduce((total, item) => total + (item.alreadyOwned ? 0 : item.lineTotal), 0)
+      : previewResult.totalPrice,
+    priceLabel: ownedIds.size > 0 ? 'Tạm tính linh kiện cần mua' : 'Tổng tạm tính (Giá hiện tại từ máy chủ)',
     savedDateStr: null,
     exportedAt: new Date(),
     estimatedWattage: previewResult.estimatedWattage,

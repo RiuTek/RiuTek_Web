@@ -555,13 +555,13 @@ async function drawToCanvas(
     ctx.textAlign = 'right'
     ctx.font = FONT_TABLE_UNIT_PRICE
     ctx.fillStyle = '#334155'
-    ctx.fillText(formatVnd(row.item.unitPrice), COL_UNIT_PRICE_RIGHT_X, rowY + ROW_PADDING_TOP)
+    ctx.fillText(row.item.alreadyOwned ? 'Đã có' : formatVnd(row.item.unitPrice), COL_UNIT_PRICE_RIGHT_X, rowY + ROW_PADDING_TOP)
 
     // 5. Thành tiền
     ctx.textAlign = 'right'
     ctx.font = FONT_TABLE_TOTAL
     ctx.fillStyle = '#0F172A'
-    ctx.fillText(formatVnd(row.item.lineTotal), COL_TOTAL_RIGHT_X, rowY + ROW_PADDING_TOP)
+    ctx.fillText(row.item.alreadyOwned ? '—' : formatVnd(row.item.lineTotal), COL_TOTAL_RIGHT_X, rowY + ROW_PADDING_TOP)
 
     rowY += row.height
   }

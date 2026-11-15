@@ -37,6 +37,7 @@ interface PCBuilderSlotListProps {
   onSelectSlot: (slot: ComponentType) => void
   onUpdateQuantity: (productId: string, quantity: number) => void
   onRemoveItem: (productId: string) => void
+  onIncludeOwnedItem?: (productId: string) => void
 }
 
 const SLOT_ICONS: Record<ComponentType, React.ElementType> = {
@@ -86,6 +87,7 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
   onSelectSlot,
   onUpdateQuantity,
   onRemoveItem,
+  onIncludeOwnedItem,
 }) => {
   // Map preview item theo productId
   const previewMap = new Map<string, PCBuildPreviewItem>()
@@ -173,7 +175,7 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
             {/* Selected Items for this Slot */}
             {slotItems.length > 0 && (
               <div className="p-4 sm:p-5 space-y-3 bg-slate-50/50 rounded-b-3xl">
-                {slotItems.map(({ product, quantity }) => {
+                {slotItems.map(({ product, quantity, alreadyOwned }) => {
                   const preview = previewMap.get(product.id)
                   const unitPrice = preview ? preview.currentUnitPrice : product.price
                   const lineTotal = preview ? preview.lineTotal : product.price * quantity
@@ -213,7 +215,14 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                           >
                             {preview?.name || product.name}
                           </h4>
-                          <div className="flex items-center gap-2 text-xs">
+                          {alreadyOwned ? (
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="font-semibold text-emerald-700">Bạn đã có</span>
+                              {onIncludeOwnedItem && <button type="button" disabled={disabled}
+                                className="font-semibold text-slate-600 underline hover:text-slate-900"
+                                onClick={() => onIncludeOwnedItem(product.id)}>Tính vào món cần mua</button>}
+                            </div>
+                          ) : <div className="flex items-center gap-2 text-xs">
                             <span className="font-semibold text-slate-600">
                               {formatVnd(unitPrice)}
                             </span>
@@ -225,16 +234,16 @@ export const PCBuilderSlotList: React.FC<PCBuilderSlotListProps> = ({
                                 </span>
                               </span>
                             )}
-                          </div>
+                          </div>}
 
                           {/* Purchase or Issue Warning Tag */}
-                          {!canPurchase && (
+                          {!alreadyOwned && !canPurchase && (
                             <div className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full mt-1">
                               <AlertTriangle className="w-3 h-3 text-rose-600" />
                               <span>Sản phẩm hiện không thể đặt mua</span>
                             </div>
                           )}
-                          {issueCode && (
+                          {!alreadyOwned && issueCode && (
                             <div className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full mt-1 ml-1">
                               <span>Mã lưu ý: {issueCode}</span>
                             </div>

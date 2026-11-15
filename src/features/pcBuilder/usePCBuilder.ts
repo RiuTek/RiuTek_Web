@@ -13,10 +13,13 @@ import {
 } from './pcBuilderConstants'
 import {
   clearSaveIntent,
+  DRAFT_TTL_MS,
   loadDraft,
   peekSaveIntent,
   removeDraft,
   saveDraft,
+  type AiBuildTransfer,
+  type PCBuilderDraftItem,
   type PCBuilderDraftPayload,
 } from './pcBuilderDraftStorage'
 import type {
@@ -34,6 +37,20 @@ interface PreviewSnapshot {
 interface ErrorSnapshot {
   configKey: string
   error: string
+}
+
+function resolvePreviewItems(inputs: PCBuilderDraftItem[], preview: PCBuildPreviewResult): SelectedPCBuildItem[] {
+  const byId = new Map(preview.items.map(item => [item.productId.toLowerCase(), item]))
+  return inputs.flatMap(input => {
+    const found = byId.get(input.productId.toLowerCase())
+    if (!found) return []
+    const product: PCBuilderProductItem = {
+      id: found.productId, name: found.name, slug: found.slug, sku: found.sku, imageUrl: found.imageUrl,
+      componentType: found.componentType, price: found.currentUnitPrice, stockQuantity: found.stockQuantity,
+      isActive: found.isActive, canPurchase: found.canPurchase, issueCode: found.issueCode, specifications: found.specifications,
+    }
+    return [{ product, quantity: input.quantity, alreadyOwned: input.alreadyOwned }]
+  })
 }
 
 export function computeSelectedProduct(
@@ -92,6 +109,7 @@ export function usePCBuilder() {
 
   // Trạng thái khôi phục bản nháp cấu hình
   const [isRestoringDraft, setIsRestoringDraft] = useState(false)
+  const [draftReady, setDraftReady] = useState(false)
   const [draftRestoreNotice, setDraftRestoreNotice] = useState<string | null>(null)
   const [draftRestoreError, setDraftRestoreError] = useState<string | null>(null)
   const [storageWarning, setStorageWarning] = useState<string | null>(null)
@@ -126,6 +144,7 @@ export function usePCBuilder() {
     if (authStatus === 'checking') return
     if (authStatus === 'unavailable') {
       isRestoreResolvedRef.current = true
+      setDraftReady(true)
       return
     }
 
@@ -196,6 +215,7 @@ export function usePCBuilder() {
 
     if (!draftToRestore || draftToRestore.items.length === 0) {
       isRestoreResolvedRef.current = true
+      setDraftReady(true)
       if (deferredAccountNotice) {
         setDraftRestoreNotice(deferredAccountNotice)
       } else if (noticeMessage) {
@@ -221,35 +241,7 @@ export function usePCBuilder() {
         return
       }
 
-      const restoredItems: SelectedPCBuildItem[] = []
-      const returnedMap = new Map<string, (typeof previewRes.items)[0]>()
-      for (const item of previewRes.items) {
-        returnedMap.set(item.productId.toLowerCase(), item)
-      }
-
-      for (const input of inputs) {
-        const found = returnedMap.get(input.productId.toLowerCase())
-        if (found) {
-          const productItem: PCBuilderProductItem = {
-            id: found.productId,
-            name: found.name,
-            slug: found.slug,
-            sku: found.sku,
-            imageUrl: found.imageUrl,
-            componentType: found.componentType,
-            price: found.currentUnitPrice,
-            stockQuantity: found.stockQuantity,
-            isActive: found.isActive,
-            canPurchase: found.canPurchase,
-            issueCode: found.issueCode,
-            specifications: found.specifications,
-          }
-          restoredItems.push({
-            product: productItem,
-            quantity: input.quantity,
-          })
-        }
-      }
+      const restoredItems = resolvePreviewItems(draftToRestore.items, previewRes)
 
       if (restoredItems.length > 0) {
         selectedItemsRef.current = restoredItems
@@ -325,6 +317,7 @@ export function usePCBuilder() {
       if (isMountedRef.current && restoreSequenceRef.current === currentSeq) {
         setIsRestoringDraft(false)
         isRestoreResolvedRef.current = true
+        setDraftReady(true)
       }
     }
   }, [authStatus, user])
@@ -365,6 +358,44 @@ export function usePCBuilder() {
   const selectedProductIds = useMemo(() => {
     return new Set(selectedItems.map((item) => item.product.id))
   }, [selectedItems])
+
+  const importAiBuild = useCallback(async (transfer: AiBuildTransfer, signal: AbortSignal) => {
+    if (authStatus !== 'authenticated' || user?.id !== transfer.ownerId) throw new Error('Phiên đăng nhập đã thay đổi.')
+    if (Date.now() - transfer.createdAt > DRAFT_TTL_MS) throw new Error('Gợi ý đã hết hạn. Bạn hãy hỏi AI lại để lấy cấu hình mới.')
+    const beforeImport = selectedItemsRef.current
+    const preview = await previewPCBuild(transfer.items.map(({ productId, quantity }) => ({ productId, quantity })), signal)
+    signal.throwIfAborted()
+    if (!isMountedRef.current) return
+    if (beforeImport !== selectedItemsRef.current) throw new Error('Bản nháp vừa thay đổi. Hãy xác nhận lại để áp dụng cấu hình AI.')
+    const imported = resolvePreviewItems(transfer.items, preview)
+    if (imported.length !== transfer.items.length) throw new Error('Một số linh kiện trong gợi ý không còn trong danh mục.')
+
+    const configKey = imported.map(item => `${item.product.id}:${item.quantity}`).sort().join(';')
+    const now = Date.now()
+    abortControllerRef.current?.abort()
+    activeSequenceRef.current++
+    selectedItemsRef.current = imported
+    setSelectedItems(imported)
+    setLastModifiedAt(now)
+    setPreviewSnapshot({ configKey, result: preview })
+    setCompletedKey(configKey)
+    setErrorSnapshot(null)
+    setDraftRestoreError(null)
+    setDraftRestoreNotice('Đã mở cấu hình AI. Giá, tồn kho và tương thích đã được kiểm tra lại.')
+    if (!saveDraft(transfer.ownerId, imported, now)) {
+      setStorageWarning('Cấu hình đã mở nhưng trình duyệt không lưu được bản nháp trong tab này.')
+    }
+  }, [authStatus, user?.id])
+
+  const includeOwnedItemInPurchase = useCallback((productId: string) => {
+    const next = selectedItemsRef.current.map(item => item.product.id === productId && item.alreadyOwned
+      ? { ...item, alreadyOwned: false }
+      : item)
+    setLastModifiedAt(Date.now())
+    selectedItemsRef.current = next
+    setSelectedItems(next)
+    persistSelection(next)
+  }, [persistSelection])
 
   // Key xác thực đại diện duy nhất cho cấu hình hiện tại
   const currentConfigKey = useMemo(() => {
@@ -464,6 +495,9 @@ export function usePCBuilder() {
   // Xóa toàn bộ cấu hình
   const clearBuild = useCallback(() => {
     restoreSequenceRef.current++
+    isRestoreResolvedRef.current = true
+    setIsRestoringDraft(false)
+    setDraftReady(true)
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
@@ -581,6 +615,9 @@ export function usePCBuilder() {
     removeItem,
     clearBuild,
     retryPreview,
+    draftReady,
+    importAiBuild,
+    includeOwnedItemInPurchase,
     isRestoringDraft,
     draftRestoreNotice,
     draftRestoreError,

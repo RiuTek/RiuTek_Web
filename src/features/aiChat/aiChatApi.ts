@@ -1,4 +1,4 @@
-import { apiClient } from '../../lib/api'
+import { ApiError, apiClient } from '../../lib/api'
 
 export const AI_MESSAGE_LIMIT = 500
 export const AI_HISTORY_LIMIT = 4
@@ -19,6 +19,7 @@ export interface AiChatProduct {
 }
 
 export interface AiBuildItem {
+  productId?: string
   product: AiChatProduct
   component: string
   reason: string
@@ -43,10 +44,22 @@ export interface AiChatReply {
   }[]
 }
 
-export function askAiChat(
+export async function askAiChat(
   body: { question: string; productSlug?: string; history: AiChatMessage[] },
-  token: string,
+  getAccessToken: (forceRefresh?: boolean) => Promise<string | null>,
   signal: AbortSignal,
 ) {
-  return apiClient.post<AiChatReply>('/ai/ask', body, { token, signal })
+  const token = await getAccessToken()
+  signal.throwIfAborted()
+  if (!token) throw new ApiError({ message: 'Phiên đăng nhập đã hết hạn.', status: 401 })
+
+  try {
+    return await apiClient.post<AiChatReply>('/ai/ask', body, { token, signal })
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401 || signal.aborted) throw error
+    const freshToken = await getAccessToken(true)
+    signal.throwIfAborted()
+    if (!freshToken) throw error
+    return apiClient.post<AiChatReply>('/ai/ask', body, { token: freshToken, signal })
+  }
 }

@@ -1,8 +1,9 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { ExternalLink, LoaderCircle, MessageCircle, Minus, Package, Send, Sparkles } from 'lucide-react'
-import { Link, useMatch } from 'react-router-dom'
-import { executeWithAdminAuth, isContentManagerRole } from '../admin/adminGuardHelper'
+import { ExternalLink, LoaderCircle, MessageCircle, Minus, Package, Send, Sparkles, Wrench } from 'lucide-react'
+import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { UserRole } from '../auth/authTypes'
+import { readAiBuildTransfer } from '../pcBuilder/pcBuilderDraftStorage'
 import { formatVnd } from '../products/productConstants'
 import { ApiError } from '../../lib/api'
 import { AI_HISTORY_LIMIT, AI_MESSAGE_LIMIT, askAiChat, type AiBuildItem, type AiChatProduct, type AiChatReply } from './aiChatApi'
@@ -76,7 +77,7 @@ function ChatProduct({ product, buildItem }: { product: AiChatProduct; buildItem
   )
 }
 
-function ChatReply({ reply }: { reply: AiChatReply }) {
+function ChatReply({ reply, onOpenBuild }: { reply: AiChatReply; onOpenBuild: (items: AiBuildItem[]) => void }) {
   const build = reply.build
   return (
     <div className="space-y-3 rounded-2xl rounded-tl-sm bg-slate-100 px-3.5 py-3 text-sm text-slate-800">
@@ -89,6 +90,12 @@ function ChatReply({ reply }: { reply: AiChatReply }) {
               Giá linh kiện cần mua <strong>{formatVnd(build.totalVnd)}</strong> / {formatVnd(build.budgetVnd)}
             </p>
             <p className="mt-1 text-xs text-slate-700">Công suất nguồn khuyến nghị {build.recommendedPsuWattage} W</p>
+            {build.items.length > 0 && build.items.every(item => item.productId) && (
+              <button type="button" onClick={() => onOpenBuild(build.items)}
+                className="mt-3 inline-flex min-h-10 items-center gap-2 rounded-lg bg-red-700 px-3 text-xs font-bold text-white hover:bg-red-800">
+                <Wrench size={15} aria-hidden="true" /> Mở trong PC Builder
+              </button>
+            )}
           </div>
           <ul className="space-y-2">
             {build.items.map((item) => (
@@ -128,17 +135,19 @@ function ChatReply({ reply }: { reply: AiChatReply }) {
   )
 }
 
-export function StaffAiChat() {
+export function AiChatWidget() {
   const { status, isAuthenticated, user } = useAuth()
-  if (status !== 'authenticated' || !isAuthenticated || !user?.id || !isContentManagerRole(user.role)) {
+  if (status !== 'authenticated' || !isAuthenticated || !user?.id ||
+      ![UserRole.Customer, UserRole.Staff, UserRole.Admin].includes(user.role)) {
     return null
   }
 
-  return <AiChat key={user.id} />
+  return <AiChat key={user.id} ownerId={user.id} />
 }
 
-function AiChat() {
-  const { status, user, getAccessToken } = useAuth()
+function AiChat({ ownerId }: { ownerId: string }) {
+  const { getAccessToken } = useAuth()
+  const navigate = useNavigate()
   const slug = useMatch('/products/:slug')?.params.slug
   const productSlug = slug && slug.length <= 200 ? slug : undefined
   const panelId = useId()
@@ -176,6 +185,21 @@ function AiChat() {
     launcher.current?.focus()
   }
 
+  function openBuild(items: AiBuildItem[]) {
+    const aiBuild = readAiBuildTransfer({ aiBuild: {
+      ownerId,
+      createdAt: Date.now(),
+      items: items.map(item => ({ productId: item.productId, quantity: 1, alreadyOwned: item.alreadyOwned })),
+    } }, ownerId)
+    if (!aiBuild) {
+      setError('Không thể mở cấu hình này. Bạn vui lòng yêu cầu tư vấn lại.')
+      return
+    }
+
+    setOpen(false)
+    navigate('/pc-builder', { state: { aiBuild } })
+  }
+
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const question = draft.trim()
@@ -191,13 +215,7 @@ function AiChat() {
     ]).filter((message) => message.content.trim().length > 0)
 
     try {
-      const reply = await executeWithAdminAuth({
-        authStatus: status,
-        user,
-        getAccessToken,
-        isContextCurrent: () => !controller.signal.aborted,
-        operation: (token) => askAiChat({ question, productSlug, history }, token, controller.signal),
-      })
+      const reply = await askAiChat({ question, productSlug, history }, getAccessToken, controller.signal)
       if (controller.signal.aborted) return
       if (typeof reply?.answer !== 'string' || !reply.answer.trim() ||
           !Array.isArray(reply.products) || !Array.isArray(reply.sources)) {
@@ -234,7 +252,7 @@ function AiChat() {
             </span>
             <div className="min-w-0 flex-1">
               <h2 id={`${panelId}-title`} className="text-sm font-bold">Tư vấn AI RiuTek</h2>
-              <p className="text-xs text-slate-300">Dùng thử nội bộ</p>
+              <p className="text-xs text-slate-300">Tư vấn chọn linh kiện và cấu hình PC</p>
             </div>
             <button type="button" aria-label="Thu gọn khung chat" onClick={minimize}
               className="grid size-9 place-items-center rounded-lg hover:bg-slate-800">
@@ -251,7 +269,7 @@ function AiChat() {
                   {turn.question}
                 </p>
                 <div ref={turn.reply.build && index === turns.length - 1 ? latestBuildReply : undefined}>
-                  <ChatReply reply={turn.reply} />
+                  <ChatReply reply={turn.reply} onOpenBuild={openBuild} />
                 </div>
               </div>
             ))}

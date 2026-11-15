@@ -40,6 +40,33 @@ const UUID_REGEX =
 export interface PCBuilderDraftItem {
   productId: string
   quantity: number
+  alreadyOwned?: boolean
+}
+
+export interface AiBuildTransfer {
+  ownerId: string
+  createdAt: number
+  items: PCBuilderDraftItem[]
+}
+
+export function readAiBuildTransfer(state: unknown, ownerId?: string): AiBuildTransfer | null {
+  const transfer = (state as { aiBuild?: AiBuildTransfer } | null)?.aiBuild
+  const now = Date.now()
+  if (!ownerId || transfer?.ownerId !== ownerId || !Number.isFinite(transfer.createdAt) ||
+      transfer.createdAt > now || now - transfer.createdAt > DRAFT_TTL_MS || !Array.isArray(transfer.items) ||
+      transfer.items.length === 0 || transfer.items.length > MAX_BUILD_ITEMS) return null
+
+  const seen = new Set<string>()
+  const items: PCBuilderDraftItem[] = []
+  for (const item of transfer.items) {
+    if (typeof item?.productId !== 'string' || !UUID_REGEX.test(item.productId) ||
+        item.quantity !== 1 || (item.alreadyOwned !== undefined && typeof item.alreadyOwned !== 'boolean')) return null
+    const productId = item.productId.toLowerCase()
+    if (seen.has(productId)) return null
+    seen.add(productId)
+    items.push({ productId, quantity: 1, alreadyOwned: item.alreadyOwned === true })
+  }
+  return { ownerId, createdAt: transfer.createdAt, items }
 }
 
 export interface PCBuilderDraftPayload {
@@ -211,6 +238,7 @@ export function validateDraftPayload(
         validItems.push({
           productId: cleanId,
           quantity: (item as Record<string, unknown>).quantity as number,
+          ...((item as Record<string, unknown>).alreadyOwned === true ? { alreadyOwned: true } : {}),
         })
       }
     }
@@ -410,7 +438,7 @@ export function loadDraft(owner: 'guest' | string): {
  */
 export function saveDraft(
   owner: 'guest' | string,
-  items: Array<{ product: { id: string }; quantity: number }>,
+  items: Array<{ product: { id: string }; quantity: number; alreadyOwned?: boolean }>,
   customUpdatedAt?: number
 ): boolean {
   const storageKey = owner === 'guest' ? DRAFT_GUEST_KEY : DRAFT_USER_KEY
@@ -422,6 +450,7 @@ export function saveDraft(
   const draftItems: PCBuilderDraftItem[] = items.slice(0, MAX_BUILD_ITEMS).map((item) => ({
     productId: item.product.id,
     quantity: item.quantity,
+    ...(item.alreadyOwned ? { alreadyOwned: true } : {}),
   }))
 
   const payload: PCBuilderDraftPayload = {

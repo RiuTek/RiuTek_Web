@@ -1,5 +1,5 @@
-import React from 'react'
-import { Link } from 'react-router-dom'
+import React, { useCallback, useMemo } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Wrench,
   Cpu,
@@ -17,9 +17,24 @@ import { usePCBuilder } from '../features/pcBuilder/usePCBuilder'
 import { PCBuilderSlotList } from '../features/pcBuilder/components/PCBuilderSlotList'
 import { PCBuilderProductPickerModal } from '../features/pcBuilder/components/PCBuilderProductPickerModal'
 import { PCBuilderSummary } from '../features/pcBuilder/components/PCBuilderSummary'
+import { AiBuildHandoff } from '../features/pcBuilder/components/AiBuildHandoff'
+import { readAiBuildTransfer } from '../features/pcBuilder/pcBuilderDraftStorage'
+import { useAuth } from '../features/auth/AuthContext'
 import type { ComponentType, ProductSummary } from '../features/products/productTypes'
 
 export const PCBuilderPage: React.FC = () => {
+  const { status, user } = useAuth()
+  const ownerId = status === 'authenticated' ? user?.id : undefined
+  return <PCBuilderWorkspace key={ownerId ?? 'guest'} ownerId={ownerId} />
+}
+
+function PCBuilderWorkspace({ ownerId }: { ownerId?: string }) {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const transfer = useMemo(() => readAiBuildTransfer(location.state, ownerId), [location.state, ownerId])
+  const dismissTransfer = useCallback(() => {
+    navigate({ pathname: location.pathname, search: location.search, hash: location.hash }, { replace: true, state: null })
+  }, [navigate, location.pathname, location.search, location.hash])
   const {
     selectedItems,
     activeSlot,
@@ -41,6 +56,9 @@ export const PCBuilderPage: React.FC = () => {
     dismissDraftRestoreNotice,
     dismissDraftRestoreError,
     dismissStorageWarning,
+    draftReady,
+    importAiBuild,
+    includeOwnedItemInPurchase,
   } = usePCBuilder()
 
   const handleSelectProduct = (product: ProductSummary) => {
@@ -104,6 +122,11 @@ export const PCBuilderPage: React.FC = () => {
 
       {/* Main Content Layout */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-4">
+        {transfer && (
+          <AiBuildHandoff key={location.key} transfer={transfer} draftReady={draftReady && !isRestoringDraft}
+            needsConfirmation={selectedItems.length > 0 || !!draftRestoreError}
+            onApply={importAiBuild} onDismiss={dismissTransfer} />
+        )}
         {/* Draft Restore Feedback Banners */}
         {isRestoringDraft && (
           <div className="p-3.5 rounded-2xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-center gap-2.5">
@@ -198,6 +221,7 @@ export const PCBuilderPage: React.FC = () => {
               }}
               onUpdateQuantity={updateItemQuantity}
               onRemoveItem={removeItem}
+              onIncludeOwnedItem={includeOwnedItemInPurchase}
             />
           </div>
 

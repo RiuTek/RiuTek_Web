@@ -215,13 +215,16 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   }, [showSaveModal, currentModalStep])
 
   // Kiểm tra quyền sở hữu và khớp snapshot cấu hình lúc save
+  const ownedIds = new Set(selectedItems.filter(item => item.alreadyOwned).map(item => item.product.id.toLowerCase()))
+  const hasOwnedItems = ownedIds.size > 0
+  const itemsToBuy = previewResult?.items.filter(item => !ownedIds.has(item.productId.toLowerCase()))
   const isCurrentBuildSaved =
     savedBuildInfo !== null &&
     authStatus === 'authenticated' &&
     user?.role === UserRole.Customer &&
     user?.id === savedBuildInfo.ownerUserId &&
     savedBuildInfo.configKeyAtSave === currentConfigKey &&
-    hasItems
+    hasItems && !hasOwnedItems
 
   // Kiểm tra điều kiện xuất ảnh cấu hình
   const exportEligibility = useMemo(() => {
@@ -265,7 +268,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
 
   // Mở form lưu cấu hình
   const handleOpenSaveModal = (e?: React.MouseEvent<HTMLButtonElement>) => {
-    if (!hasItems) return
+    if (!hasItems || hasOwnedItems) return
     if (e) {
       saveTriggerBtnRef.current = e.currentTarget
     }
@@ -402,7 +405,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   // Submit lưu cấu hình từ form ban đầu
   const handleSaveSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (isSaving || !hasItems || !user || user.role !== UserRole.Customer) {
+    if (isSaving || !hasItems || hasOwnedItems || !user || user.role !== UserRole.Customer) {
       return
     }
 
@@ -472,6 +475,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
   const handleConfirmedSave = async () => {
     if (
       isSaving ||
+      hasOwnedItems ||
       !user ||
       user.role !== UserRole.Customer ||
       !activeConfirmationSnapshot
@@ -644,7 +648,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
           />
 
           {/* Purchase Capability Warning */}
-          {!previewResult.canPurchaseAll && (
+          {itemsToBuy?.some(item => !item.canPurchase) && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2 text-xs text-rose-800">
               <ShoppingBag className="w-4 h-4 text-rose-600 flex-shrink-0" />
               <span>
@@ -656,13 +660,13 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
           {/* Total Price Section */}
           <div className="pt-4 border-t border-slate-100 flex items-baseline justify-between">
             <div>
-              <span className="text-xs text-slate-500 block">Tạm tính toàn bộ:</span>
+              <span className="text-xs text-slate-500 block">{hasOwnedItems ? 'Tạm tính linh kiện cần mua:' : 'Tạm tính toàn bộ:'}</span>
               <span className="text-[10px] text-slate-400">
                 Giá niêm yết từ hệ thống
               </span>
             </div>
             <span className="text-xl sm:text-2xl font-black text-red-600">
-              {formatVnd(previewResult.totalPrice)}
+              {formatVnd(hasOwnedItems ? (itemsToBuy ?? []).reduce((total, item) => total + item.lineTotal, 0) : previewResult.totalPrice)}
             </span>
           </div>
         </div>
@@ -783,7 +787,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
         <div className="space-y-1 text-center">
           <button
             type="button"
-            disabled={!hasItems || isLoading || isSaving}
+            disabled={!hasItems || hasOwnedItems || isLoading || isSaving}
             onClick={handleOpenSaveModal}
             className="w-full py-3 px-4 rounded-2xl bg-red-600 hover:bg-red-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm transition-colors flex items-center justify-center gap-2 shadow-2xs"
           >
@@ -795,7 +799,7 @@ export const PCBuilderSummary: React.FC<PCBuilderSummaryProps> = ({
             </span>
           </button>
           <p className="text-[10px] text-slate-400">
-            {authStatus === 'anonymous'
+            {hasOwnedItems ? 'Bản nháp trong tab giữ các món bạn đã có. Để lưu vào tài khoản, hãy bỏ các món đó hoặc chọn tính chúng vào cấu hình cần mua.' : authStatus === 'anonymous'
               ? 'Khách vãng lai sẽ được bảo toàn cấu hình và chuyển hướng đăng nhập để lưu.'
               : 'Lưu cấu hình giúp bạn xem lại sau. Không tự thêm giỏ hay tạo đơn hàng.'}
           </p>
