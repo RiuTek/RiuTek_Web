@@ -35,6 +35,10 @@ export interface AiChatReply {
     totalVnd: number
     recommendedPsuWattage: number
     items: AiBuildItem[]
+    useCase?: 'office' | 'gaming' | 'creation' | null
+    minRamGb?: number
+    minStorageGb?: number
+    keptComponents?: string[] | null
   } | null
   sources: {
     kind: 'catalog' | 'manufacturer' | 'faq'
@@ -44,8 +48,31 @@ export interface AiChatReply {
   }[]
 }
 
+export interface AiPreviousBuild {
+  budgetVnd: number
+  useCase: 'office' | 'gaming' | 'creation'
+  minRamGb: number
+  minStorageGb: number
+  keptComponents: string[]
+  items: { productId: string; alreadyOwned: boolean }[]
+}
+
+export function previousBuildContext(reply: AiChatReply | undefined): AiPreviousBuild | undefined {
+  const build = reply?.build
+  if (!build || !build.useCase || build.items.length === 0 || build.items.length > 8 ||
+      build.items.some(item => !item.productId)) return undefined
+  return {
+    budgetVnd: build.budgetVnd,
+    useCase: build.useCase,
+    minRamGb: build.minRamGb ?? 0,
+    minStorageGb: build.minStorageGb ?? 0,
+    keptComponents: build.keptComponents ?? [],
+    items: build.items.map(item => ({ productId: item.productId!, alreadyOwned: item.alreadyOwned })),
+  }
+}
+
 export async function askAiChat(
-  body: { question: string; productSlug?: string; history: AiChatMessage[] },
+  body: { question: string; productSlug?: string; history: AiChatMessage[]; previousBuild?: AiPreviousBuild },
   getAccessToken: (forceRefresh?: boolean) => Promise<string | null>,
   signal: AbortSignal,
 ) {

@@ -6,7 +6,7 @@ import { UserRole } from '../auth/authTypes'
 import { readAiBuildTransfer } from '../pcBuilder/pcBuilderDraftStorage'
 import { formatVnd } from '../products/productConstants'
 import { ApiError } from '../../lib/api'
-import { AI_HISTORY_LIMIT, AI_MESSAGE_LIMIT, askAiChat, type AiBuildItem, type AiChatProduct, type AiChatReply } from './aiChatApi'
+import { AI_HISTORY_LIMIT, AI_MESSAGE_LIMIT, askAiChat, previousBuildContext, type AiBuildItem, type AiChatProduct, type AiChatReply } from './aiChatApi'
 
 interface ChatTurn {
   id: number
@@ -215,7 +215,8 @@ function AiChat({ ownerId }: { ownerId: string }) {
     ]).filter((message) => message.content.trim().length > 0)
 
     try {
-      const reply = await askAiChat({ question, productSlug, history }, getAccessToken, controller.signal)
+      const previousBuild = previousBuildContext([...turns].reverse().find(turn => turn.reply.build)?.reply)
+      const reply = await askAiChat({ question, productSlug, history, previousBuild }, getAccessToken, controller.signal)
       if (controller.signal.aborted) return
       if (typeof reply?.answer !== 'string' || !reply.answer.trim() ||
           !Array.isArray(reply.products) || !Array.isArray(reply.sources)) {
