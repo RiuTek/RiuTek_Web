@@ -142,6 +142,12 @@ export async function apiRequest<TResponse = unknown>(
   const isJson = contentType.includes('application/json') || contentType.includes('+json')
 
   if (!response.ok) {
+    const retryAfterHeader = response.headers.get('Retry-After')?.trim()
+    const retryAfterValue = retryAfterHeader && /^\d+$/.test(retryAfterHeader)
+      ? Number(retryAfterHeader)
+      : retryAfterHeader ? Math.ceil((Date.parse(retryAfterHeader) - Date.now()) / 1000) : NaN
+    const retryAfterSeconds = Number.isFinite(retryAfterValue) && retryAfterValue >= 0 && retryAfterValue <= 604800
+      ? retryAfterValue : undefined
     if (isJson) {
       try {
         const errorData = await response.json()
@@ -151,10 +157,10 @@ export async function apiRequest<TResponse = unknown>(
             throw ApiError.fromBusinessError(response.status, {
               code: typeof code === 'string' ? code : undefined,
               description: typeof description === 'string' ? description : undefined,
-            })
+            }, retryAfterSeconds)
           }
           if (title || detail || errors) {
-            throw ApiError.fromProblemDetails(response.status, errorData as ProblemDetails)
+            throw ApiError.fromProblemDetails(response.status, errorData as ProblemDetails, retryAfterSeconds)
           }
         }
       } catch (parseError) {
@@ -163,7 +169,7 @@ export async function apiRequest<TResponse = unknown>(
         }
       }
     }
-    throw ApiError.fromHttpFallback(response.status, response.statusText)
+    throw ApiError.fromHttpFallback(response.status, response.statusText, retryAfterSeconds)
   }
 
   if (isJson) {

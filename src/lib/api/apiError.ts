@@ -8,6 +8,7 @@ export interface ApiErrorInit {
   problemDetails?: ProblemDetails
   isNetworkError?: boolean
   isAbortError?: boolean
+  retryAfterSeconds?: number
   cause?: unknown
 }
 
@@ -18,6 +19,7 @@ export class ApiError extends Error {
   readonly problemDetails?: ProblemDetails
   readonly isNetworkError: boolean
   readonly isAbortError: boolean
+  readonly retryAfterSeconds?: number
 
   constructor(init: ApiErrorInit) {
     const defaultMessage =
@@ -33,33 +35,37 @@ export class ApiError extends Error {
     this.problemDetails = init.problemDetails
     this.isNetworkError = Boolean(init.isNetworkError)
     this.isAbortError = Boolean(init.isAbortError)
+    this.retryAfterSeconds = init.retryAfterSeconds
     if (init.cause) {
       this.cause = init.cause
     }
   }
 
-  static fromBusinessError(status: number, error: ApiBusinessError): ApiError {
+  static fromBusinessError(status: number, error: ApiBusinessError, retryAfterSeconds?: number): ApiError {
     return new ApiError({
       status,
       code: error.code,
       description: error.description,
       message: error.description || error.code,
+      retryAfterSeconds,
     })
   }
 
-  static fromProblemDetails(status: number, details: ProblemDetails): ApiError {
+  static fromProblemDetails(status: number, details: ProblemDetails, retryAfterSeconds?: number): ApiError {
     const message = details.detail || details.title || `Lỗi yêu cầu (HTTP ${status}).`
     return new ApiError({
       status,
       message,
       description: details.detail,
       problemDetails: details,
+      retryAfterSeconds,
     })
   }
 
-  static fromHttpFallback(status: number, statusText?: string): ApiError {
+  static fromHttpFallback(status: number, statusText?: string, retryAfterSeconds?: number): ApiError {
     return new ApiError({
       status,
+      retryAfterSeconds,
       message: statusText
         ? `Yêu cầu thất bại (${status} ${statusText}).`
         : `Yêu cầu thất bại với mã trạng thái ${status}.`,

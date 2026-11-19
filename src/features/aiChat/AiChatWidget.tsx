@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
-import { ExternalLink, LoaderCircle, MessageCircle, Minus, Package, Send, Sparkles, Wrench } from 'lucide-react'
+import { Clock3, ExternalLink, LoaderCircle, MessageCircle, Minus, Package, Plus, Send, Sparkles, Wrench } from 'lucide-react'
 import { Link, useMatch, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { UserRole } from '../auth/authTypes'
@@ -12,6 +12,21 @@ interface ChatTurn {
   id: number
   question: string
   reply: AiChatReply
+}
+
+const SUGGESTED_QUESTIONS = [
+  'Mình muốn build PC chơi game dưới 25 triệu.',
+  'Gợi ý CPU dưới 5 triệu đang còn hàng.',
+  'Tư vấn PC văn phòng khoảng 12 triệu giúp mình.',
+]
+
+function rateLimitMessage(error: ApiError) {
+  switch (error.code ?? error.problemDetails?.title) {
+    case 'Ai.TurnLimitExceeded': return 'Bạn đã dùng hết lượt hỏi trong khoảng thời gian này.'
+    case 'Ai.CustomerDailyLimitExceeded': return 'Hạn mức tư vấn dành cho khách hàng hôm nay đã hết.'
+    case 'Ai.ProviderLimitExceeded': return 'Tư vấn AI đã đạt giới hạn phục vụ trong ngày.'
+    default: return 'Tư vấn AI đang nhận quá nhiều yêu cầu. Bạn vui lòng thử lại sau.'
+  }
 }
 
 function httpsUrl(value: string | null | undefined) {
@@ -28,7 +43,7 @@ function chatError(error: unknown) {
   if (error instanceof ApiError) {
     if (error.status === 429) return 'Bạn đã dùng hết lượt hỏi hiện tại. Vui lòng thử lại sau.'
     if (error.status === 401) return 'Phiên đăng nhập đã hết hạn. Bạn vui lòng đăng nhập lại.'
-    if (error.status === 403) return 'Tài khoản này chưa có quyền dùng thử tư vấn AI.'
+    if (error.status === 403) return 'Tài khoản hiện không có quyền dùng tư vấn AI.'
   }
   return 'Tư vấn AI đang gián đoạn. Bạn có thể gửi lại câu hỏi sau ít phút.'
 }
@@ -157,6 +172,8 @@ function AiChat({ ownerId }: { ownerId: string }) {
   const [turns, setTurns] = useState<ChatTurn[]>([])
   const [pendingQuestion, setPendingQuestion] = useState('')
   const [error, setError] = useState('')
+  const [confirmNewChat, setConfirmNewChat] = useState(false)
+  const [rateLimit, setRateLimit] = useState<{ message: string; retryAt: number | null } | null>(null)
   const request = useRef<AbortController | null>(null)
   const nextId = useRef(0)
   const log = useRef<HTMLDivElement>(null)
@@ -165,6 +182,12 @@ function AiChat({ ownerId }: { ownerId: string }) {
   const launcher = useRef<HTMLButtonElement>(null)
 
   useEffect(() => () => request.current?.abort(), [])
+
+  useEffect(() => {
+    if (rateLimit?.retryAt == null) return
+    const timer = window.setTimeout(() => setRateLimit(null), Math.max(0, rateLimit.retryAt - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [rateLimit])
 
   useEffect(() => {
     if (open) input.current?.focus()
@@ -178,11 +201,27 @@ function AiChat({ ownerId }: { ownerId: string }) {
       return
     }
     viewport.scrollTop = viewport.scrollHeight
-  }, [open, turns, pendingQuestion, error])
+  }, [open, turns, pendingQuestion, error, rateLimit])
 
   function minimize() {
     setOpen(false)
     launcher.current?.focus()
+  }
+
+  function startNewChat() {
+    request.current?.abort()
+    request.current = null
+    setTurns([])
+    setDraft('')
+    setPendingQuestion('')
+    setError('')
+    setConfirmNewChat(false)
+    input.current?.focus()
+  }
+
+  function suggestQuestion(question: string) {
+    setDraft(question)
+    input.current?.focus()
   }
 
   function openBuild(items: AiBuildItem[]) {
@@ -203,12 +242,13 @@ function AiChat({ ownerId }: { ownerId: string }) {
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const question = draft.trim()
-    if (!question || question.length > AI_MESSAGE_LIMIT || request.current) return
+    if (!question || question.length > AI_MESSAGE_LIMIT || request.current || confirmNewChat || rateLimit?.retryAt != null) return
 
     const controller = new AbortController()
     request.current = controller
     setPendingQuestion(question)
     setError('')
+    setRateLimit(null)
     const history = turns.slice(-(AI_HISTORY_LIMIT / 2)).flatMap((turn) => [
       { role: 'user' as const, content: turn.question },
       { role: 'assistant' as const, content: turn.reply.answer.trim().slice(0, AI_MESSAGE_LIMIT) },
@@ -226,7 +266,14 @@ function AiChat({ ownerId }: { ownerId: string }) {
       setTurns((previous) => [...previous, turn])
       setDraft('')
     } catch (cause) {
-      if (!controller.signal.aborted) setError(chatError(cause))
+      if (!controller.signal.aborted) {
+        if (cause instanceof ApiError && cause.status === 429) {
+          setRateLimit({
+            message: rateLimitMessage(cause),
+            retryAt: cause.retryAfterSeconds != null ? Date.now() + cause.retryAfterSeconds * 1000 : null,
+          })
+        } else setError(chatError(cause))
+      }
     } finally {
       if (request.current === controller) request.current = null
       if (!controller.signal.aborted) setPendingQuestion('')
@@ -255,15 +302,40 @@ function AiChat({ ownerId }: { ownerId: string }) {
               <h2 id={`${panelId}-title`} className="text-sm font-bold">Tư vấn AI RiuTek</h2>
               <p className="text-xs text-slate-300">Tư vấn chọn linh kiện và cấu hình PC</p>
             </div>
+            <button type="button" aria-label="Cuộc trò chuyện mới" title="Cuộc trò chuyện mới"
+              onClick={() => turns.length > 0 || draft.trim() || pendingQuestion ? setConfirmNewChat(true) : startNewChat()}
+              className="flex min-h-9 items-center gap-1 rounded-lg px-2 text-xs font-semibold hover:bg-slate-800">
+              <Plus size={16} aria-hidden="true" /> Mới
+            </button>
             <button type="button" aria-label="Thu gọn khung chat" onClick={minimize}
               className="grid size-9 place-items-center rounded-lg hover:bg-slate-800">
               <Minus size={18} aria-hidden="true" />
             </button>
           </div>
+          {confirmNewChat && (
+            <div className="shrink-0 space-y-2 border-b border-slate-200 bg-slate-50 p-3.5 text-sm">
+              <p role="status" className="text-slate-800">Bắt đầu cuộc trò chuyện mới? Nội dung và cấu hình gợi ý trong chat hiện tại sẽ được xóa.</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={startNewChat} className="rounded-lg bg-red-700 px-3 py-2 text-xs font-semibold text-white hover:bg-red-800">Bắt đầu mới</button>
+                <button type="button" onClick={() => { setConfirmNewChat(false); input.current?.focus() }} className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200">Tiếp tục chat</button>
+              </div>
+            </div>
+          )}
           <div ref={log} role="log" aria-label="Cuộc trò chuyện" className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-3.5">
             <p className="rounded-2xl rounded-tl-sm bg-slate-100 p-3.5 text-sm leading-relaxed text-slate-700">
               Dạ, bạn muốn hỏi về linh kiện hay cần mình gợi ý một cấu hình PC theo ngân sách?
             </p>
+            {turns.length === 0 && !pendingQuestion && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-slate-500">Bạn có thể bắt đầu bằng</p>
+                {SUGGESTED_QUESTIONS.map(question => (
+                  <button key={question} type="button" onClick={() => suggestQuestion(question)} disabled={confirmNewChat}
+                    className="block w-full rounded-xl border border-red-100 bg-white px-3 py-2.5 text-left text-xs leading-relaxed text-red-800 hover:border-red-300 hover:bg-red-50 disabled:opacity-50">
+                    {question}
+                  </button>
+                ))}
+              </div>
+            )}
             {turns.map((turn, index) => (
               <div key={turn.id} className="space-y-2">
                 <p className="ml-8 rounded-2xl rounded-br-sm bg-red-700 px-3.5 py-2.5 text-sm whitespace-pre-wrap wrap-break-word text-white">
@@ -288,6 +360,18 @@ function AiChat({ ownerId }: { ownerId: string }) {
             {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
           </div>
           <form onSubmit={send} className="border-t border-slate-200 p-3">
+            {rateLimit && (
+              <div role="alert" className="mb-3 flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
+                <Clock3 size={16} className="mt-0.5 shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="font-semibold">{rateLimit.message}</p>
+                  <p>{rateLimit.retryAt != null
+                    ? `Bạn có thể gửi tiếp sau ${new Date(rateLimit.retryAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}.`
+                    : 'Bạn vui lòng đợi ít phút rồi thử gửi lại.'}</p>
+                  <p className="mt-1">Mở cuộc trò chuyện mới vẫn áp dụng hạn mức này.</p>
+                </div>
+              </div>
+            )}
             {productSlug && <p className="mb-2 text-xs text-slate-600">Đang tư vấn theo sản phẩm trên trang này</p>}
             <div className="flex items-end gap-2">
               <textarea
@@ -301,17 +385,18 @@ function AiChat({ ownerId }: { ownerId: string }) {
                   event.preventDefault()
                   if (!event.repeat) event.currentTarget.form?.requestSubmit()
                 }}
-                readOnly={!!pendingQuestion}
+                readOnly={!!pendingQuestion || confirmNewChat}
                 rows={2}
                 maxLength={AI_MESSAGE_LIMIT}
                 placeholder="Nhập câu hỏi về linh kiện…"
                 className="min-w-0 flex-1 resize-none rounded-xl border border-slate-300 px-3 py-2 text-base text-slate-900 focus-visible:outline-2 focus-visible:outline-red-600"
               />
-              <button type="submit" aria-label="Gửi câu hỏi" disabled={!draft.trim() || !!pendingQuestion}
+              <button type="submit" aria-label="Gửi câu hỏi" disabled={!draft.trim() || !!pendingQuestion || confirmNewChat || rateLimit?.retryAt != null}
                 className="grid size-11 shrink-0 place-items-center rounded-xl bg-red-700 text-white hover:bg-red-800 disabled:opacity-50">
                 <Send size={18} aria-hidden="true" />
               </button>
             </div>
+            <p className="mt-2 text-[11px] text-slate-500">Enter để gửi · Shift + Enter để xuống dòng</p>
           </form>
         </section>
       )}
