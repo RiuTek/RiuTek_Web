@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom'
 import { Header } from '../components/layout/Header'
 import { Footer } from '../components/layout/Footer'
 import { AiChatWidget } from '../features/aiChat/AiChatWidget'
+import { SidePromotionalBanners } from '../features/banners/components/SidePromotionalBanners'
 
 export const PublicLayout: React.FC = () => {
   return (
@@ -13,6 +14,7 @@ export const PublicLayout: React.FC = () => {
       </main>
       <Footer />
       <AiChatWidget />
+      <SidePromotionalBanners />
     </div>
   )
 }
