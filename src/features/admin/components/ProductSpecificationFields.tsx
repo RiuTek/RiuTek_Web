@@ -273,6 +273,34 @@ export const ProductSpecificationFields: React.FC<
                 {renderFieldError('spec.maxMemorySpeedMhz')}
               </div>
 
+              <div>
+                <label
+                  htmlFor="cpu-l3-cache-mb"
+                  className="mb-1 block text-xs font-bold text-slate-700"
+                >
+                  L3 Cache (MB)
+                </label>
+                <input
+                  id="cpu-l3-cache-mb"
+                  type="number"
+                  min={0}
+                  max={2147483647}
+                  step={1}
+                  value={d.l3CacheMb}
+                  disabled={disabled}
+                  onChange={(e) => patch({ l3CacheMb: e.target.value })}
+                  placeholder="Ví dụ: 32"
+                  aria-describedby="cpu-l3-cache-help"
+                  aria-invalid={Boolean(errors['spec.l3CacheMb'])}
+                  className={inputClass(Boolean(errors['spec.l3CacheMb']))}
+                />
+                <p id="cpu-l3-cache-help" className="mt-1 text-xs text-slate-500">
+                  Chỉ nhập dung lượng L3, không cộng L2. Để trống hoặc nhập 0 nếu
+                  chưa có dữ liệu.
+                </p>
+                {renderFieldError('spec.l3CacheMb')}
+              </div>
+
               <div className="flex items-center pt-5">
                 <label className="inline-flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-slate-800">
                   <input

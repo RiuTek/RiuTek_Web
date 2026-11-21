@@ -138,6 +138,7 @@ export interface CpuSpecDraft {
   hasIntegratedGpu: boolean
   supportedMemoryType: string
   maxMemorySpeedMhz: string
+  l3CacheMb: string
 }
 
 export interface MotherboardSpecDraft {

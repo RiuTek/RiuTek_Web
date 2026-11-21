@@ -223,6 +223,7 @@ export interface CpuSpecification {
   hasIntegratedGpu: boolean
   supportedMemoryType: RamType
   maxMemorySpeedMhz: number
+  l3CacheMb: number
 }
 
 export interface MotherboardSpecification {

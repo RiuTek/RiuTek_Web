@@ -321,6 +321,7 @@ export function createEmptySpecificationDraft(
         hasIntegratedGpu: false,
         supportedMemoryType: '',
         maxMemorySpeedMhz: '',
+        l3CacheMb: '',
       } satisfies CpuSpecDraft
     case ComponentType.Motherboard:
       return {
@@ -418,6 +419,7 @@ export function mapSpecificationToDraft(
         hasIntegratedGpu: Boolean(spec.hasIntegratedGpu),
         supportedMemoryType: String(spec.supportedMemoryType),
         maxMemorySpeedMhz: String(spec.maxMemorySpeedMhz),
+        l3CacheMb: spec.l3CacheMb > 0 ? String(spec.l3CacheMb) : '',
       } satisfies CpuSpecDraft
     case 'motherboard':
       return {
@@ -581,6 +583,12 @@ export function validateAndBuildSpecification(
           'Tốc độ RAM tối đa phải là số nguyên lớn hơn 0 MHz.'
       }
 
+      const l3CacheMb = d.l3CacheMb.trim() === '' ? 0 : parseStrictInt(d.l3CacheMb)
+      if (l3CacheMb === null || l3CacheMb < 0) {
+        errors['spec.l3CacheMb'] =
+          'L3 Cache phải là số nguyên từ 0 đến 2.147.483.647 MB; để trống nếu chưa có dữ liệu.'
+      }
+
       if (Object.keys(errors).length > 0) {
         return { isValid: false, errors, specification: null }
       }
@@ -597,6 +605,7 @@ export function validateAndBuildSpecification(
         hasIntegratedGpu: Boolean(d.hasIntegratedGpu),
         supportedMemoryType: supportedMemoryType as RamType,
         maxMemorySpeedMhz: maxMemorySpeedMhz!,
+        l3CacheMb: l3CacheMb!,
       }
       return { isValid: true, errors: {}, specification }
     }
